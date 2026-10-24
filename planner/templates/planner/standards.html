@@ -1,0 +1,54 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Standards{% endblock %}
+{% block head %}
+<style>
+.layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 12px; align-items: start; }
+.layout > * { min-width: 0; }
+@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+.cat { margin-bottom: 14px; }
+.cat-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.cat-head h2 { margin: 0; }
+.cat-head .unit { font: 400 12px var(--mono); color: var(--muted); }
+.cat-head a { margin-left: auto; font-size: 13px; }
+.f { margin-bottom: 10px; } .f label { display: block; color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
+.f select { width: 100%; }
+.inline { display: inline; }
+.empty { color: var(--muted); font-size: 14px; padding: 6px 0; }
+.sticky { position: sticky; top: 16px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Shared by all scenarios</div><h1>Standards</h1>
+  <div class="sub">The industry-standard equipment you work with. On the Equipment page each RAS unit picks from this list, and quantities and margins are worked out against the plan. Unit prices are optional and carry into the equipment cost.</div></div></div>
+<div class="layout">
+  <div>
+    {% for g in groups %}
+    <section class="card cat">
+      <div class="cat-head"><h2>{{ g.label }}</h2><span class="unit">capacity in {{ g.unit }}</span><a href="?category={{ g.key }}">+ Add</a></div>
+      {% if g.items %}
+      <div class="tablewrap"><table class="data">
+        <thead><tr><th>Name</th><th>Capacity</th><th>Unit price</th><th class="l">Note</th><th></th></tr></thead>
+        <tbody>{% for s in g.items %}
+          <tr><td>{{ s.name }}</td><td>{{ s.capacity|num:1 }} {{ g.unit }}</td><td>{% if s.unit_price is not None %}{{ s.unit_price|num:0 }}{% else %}–{% endif %}</td><td class="l">{{ s.note }}</td>
+            <td><a href="?edit={{ s.pk }}">Edit</a>
+              <form class="inline" method="post" onsubmit="return confirm('Delete this standard?')">{% csrf_token %}<button class="btn danger" name="delete" value="{{ s.pk }}" style="padding:2px 8px;margin-left:8px">Delete</button></form></td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+      {% else %}<div class="empty">No {{ g.label|lower }} standards yet.</div>{% endif %}
+    </section>
+    {% endfor %}
+  </div>
+  <div class="card sticky">
+    <h2>{% if edit %}Edit standard{% else %}Add standard{% endif %}</h2>
+    <form method="post">{% csrf_token %}
+      {% if edit %}<input type="hidden" name="id" value="{{ edit.pk }}">{% endif %}
+      {{ form.non_field_errors }}
+      {% for f in form %}<div class="f"><label for="{{ f.id_for_label }}">{{ f.label }}{% if f.name == 'capacity' %} <span class="sub">(unit follows the category)</span>{% endif %}</label>{{ f }}{{ f.errors }}</div>{% endfor %}
+      <button class="btn primary" type="submit">Save standard</button>
+      {% if edit %}<a class="btn" href="{% url 'standards' %}">Cancel</a>{% endif %}
+    </form>
+    <p class="note">Examples: a Ø6 m round tank of 50 m³, a 500 m³/h recirculation pump, a 20 kg O₂/day oxygen generator.</p>
+  </div>
+</div>
+{% endblock %}

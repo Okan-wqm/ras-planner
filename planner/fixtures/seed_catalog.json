@@ -1,0 +1,13 @@
+[
+{
+  "model": "planner.equipmentstandard",
+  "pk": 1,
+  "fields": {
+    "category": "tank",
+    "name": "T-1",
+    "capacity": 14.0,
+    "unit_price": 4500.0,
+    "note": "Produced By Ceka"
+  }
+}
+]

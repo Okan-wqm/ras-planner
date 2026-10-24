@@ -1,0 +1,12 @@
+# Runtime
+# (pydantic and docstring_parser arrive transitively via anthropic; they are not
+# direct imports of this project, so they are not pinned here.)
+Django==6.1.2
+openpyxl==3.1.5
+playwright==1.63.0
+anthropic==1.11.0
+asteval==1.0.10
+
+# Dev / test
+pytest==9.1.1
+pytest-django==4.14.0

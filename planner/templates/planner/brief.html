@@ -1,0 +1,136 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Brief · {{ scenario.name }}{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 01 / 09 · Brief</div><h1>What the customer wants</h1>
+  <div class="sub">Start every design here: the production target and the site. The production plan follows from it — the stocking interval from batches per year, the harvest weight from the target weight, and the fish stocked per batch from the pieces wanted and the losses on the way.</div></div></div>
+
+<form method="post">{% csrf_token %}
+<div class="lay2">
+  <section class="card">
+    <h2>Production target</h2>
+    <div class="fgrid">
+      <label>Project / scenario name<input type="text" name="name" value="{{ b.name }}"></label>
+      <label>Customer<input type="text" name="customer" value="{{ b.customer }}" placeholder="optional"></label>
+      <label>Batches per year<input type="number" step="any" min="1" max="52" name="batches_per_year" value="{{ b.batches_per_year|plain }}" required>
+        <span class="help">One batch every {{ interval|default:"–" }} days.</span></label>
+      <label>Fish per batch at the target weight<input type="number" step="1" min="0" name="pieces_per_batch" value="{{ b.pieces_per_batch|plain }}" placeholder="e.g. 500000">
+        <span class="help">Pieces delivered per batch.</span></label>
+      <label>Target weight [g]<input type="number" step="any" min="0" name="target_weight_g" value="{{ b.target_weight_g|plain }}" required>
+        <span class="help">Harvest / delivery weight; the last RAS unit's exit weight.</span></label>
+      <label>Stocking weight [g]<input type="number" step="any" min="0" name="initial_weight_g" value="{{ b.initial_weight_g|plain }}"></label>
+      <label>First stocking date<input type="date" name="start_date" value="{{ b.start_date }}" required></label>
+    </div>
+    <label class="check" style="margin-top:14px"><input type="checkbox" name="set_stocking" {% if b.set_stocking %}checked{% endif %}> Work out the fish to stock per batch from the pieces wanted</label>
+  </section>
+
+  <section class="card">
+    <h2>Site and water</h2>
+    <div class="fgrid">
+      <label>Water source capacity [m³/h]<input type="number" step="any" min="0" name="water_m3h" value="{{ b.water_m3h|plain }}" placeholder="optional"></label>
+      <label>Altitude [m]<input type="number" step="any" name="altitude_m" value="{{ b.altitude_m|plain }}" placeholder="optional"></label>
+      <label>Water temperature [°C]<input type="number" step="any" name="temperature" value="{{ b.temperature|plain }}">
+        <span class="help">Used on days without a temperature profile.</span></label>
+      <label>Salinity [ppt]<input type="number" step="any" min="0" name="salinity" value="{{ b.salinity|plain }}"></label>
+      <label style="grid-column: 1 / -1">Temperature profile — calendar dates or day numbers
+        <input type="text" name="temperature_steps" id="temp-steps" value="{{ b.temperature_steps }}"
+               placeholder="e.g. 1 Jan:10, 10 Feb:12, 10 May:14  or  1:10, 41:12, 130:14">
+        <span class="help">Seasonal water temperature. Use calendar dates (1 Jan:10) or day numbers (1:10).
+        The temperature <strong>ramps gradually</strong> between steps (linear interpolation), not jumps.
+        Leave empty for the constant temperature above.</span>
+        <div id="temp-preview" class="mut" style="font:400 12px/1.4 var(--mono);margin-top:4px"></div>
+      </label>
+      <label style="grid-column: 1 / -1">Notes on the water source<textarea name="water_note" rows="2" placeholder="e.g. spring water, 8–11 °C, NO₃ 4 mg/L, alkalinity 120 mg/L">{{ b.water_note }}</textarea></label>
+    </div>
+    <label class="check" style="margin-top:14px"><input type="checkbox" name="use_feed_catalog" {% if b.use_feed_catalog %}checked{% endif %}> Feed by the <a href="{% url 'feeds' %}">feed table</a> (otherwise the default FCR and protein)</label>
+  </section>
+</div>
+
+<section class="card section" style="margin-top:12px">
+  <h2>What this means for the plan</h2>
+  <div class="kpis" style="margin-bottom:0">
+    <div class="kpi"><div class="k">Stocking interval</div><div class="v">{{ interval|default:"–" }}<span class="u">days</span></div></div>
+    <div class="kpi"><div class="k">Stocking to target weight</div><div class="v">{% if derived %}{{ derived.days }}<span class="u">days</span>{% else %}–{% endif %}</div>
+      <div class="n">{% if derived %}{{ derived.survival|pct:1 }} % survive{% elif derived_error %}{{ derived_error }}{% else %}enter fish per batch{% endif %}</div></div>
+    <div class="kpi"><div class="k">Fish to stock per batch</div><div class="v">{% if derived %}{{ derived.stock|num:0 }}{% else %}–{% endif %}</div>
+      <div class="n">now in the plan: {{ stock_now|num:0 }}</div></div>
+    <div class="kpi"><div class="k">Batches in the system</div><div class="v">{% if derived and interval %}{% widthratio derived.days interval 1 %}{% else %}–{% endif %}</div>
+      <div class="n">about, at the same time</div></div>
+    <div class="kpi"><div class="k">Delivered per year</div><div class="v">{% if b.pieces_per_batch %}{% widthratio b.pieces_per_batch 1 b.batches_per_year %}{% else %}–{% endif %}</div>
+      <div class="n">pieces of {{ b.target_weight_g|plain }} g</div></div>
+  </div>
+</section>
+
+<div class="savebar">
+  <button class="btn primary" type="submit">Save brief and update the plan</button>
+  <span class="note" style="margin:0">Saving sets the stocking interval, the harvest weight and the fish stocked per batch.</span>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var input = document.getElementById('temp-steps');
+  var preview = document.getElementById('temp-preview');
+  if (!input || !preview) return;
+  var MONTHS = {jan:1,oca:1,feb:2,sub:2,mar:3,apr:4,nis:4,may:5,jun:6,haz:6,
+                jul:7,tem:7,aug:8,ağu:8,sep:9,eyl:9,oct:10,eki:10,ekim:10,nov:11,kas:11,dec:12,ara:12};
+  function parse(text) {
+    var steps = [];
+    text.split(',').forEach(function (part) {
+      part = part.trim();
+      if (!part) return;
+      var m = part.match(/(\d{1,2})\s+(\w+)\s*:\s*([\d.]+)/i);
+      if (m) {
+        var mon = MONTHS[m[2].toLowerCase().substring(0,3)];
+        if (mon) {
+          var dayOfYear = (new Date(2027, mon - 1, Math.min(parseInt(m[1]), 28)) - new Date(2027, 0, 1)) / 86400000 + 1;
+          steps.push([Math.round(dayOfYear), parseFloat(m[3])]);
+          return;
+        }
+      }
+      m = part.match(/(\d+)[-\/](\d+)\s*:\s*([\d.]+)/);
+      if (m) {
+        var dayOfYear2 = (new Date(2027, parseInt(m[2]) - 1, Math.min(parseInt(m[1]), 28)) - new Date(2027, 0, 1)) / 86400000 + 1;
+        steps.push([Math.round(dayOfYear2), parseFloat(m[3])]);
+        return;
+      }
+      m = part.match(/(\d+)\s*:\s*([\d.]+)/);
+      if (m) steps.push([parseInt(m[1]), parseFloat(m[2])]);
+    });
+    return steps.sort(function (a, b) { return a[0] - b[0]; });
+  }
+  function interp(steps, day) {
+    if (!steps.length) return null;
+    if (day <= steps[0][0]) return steps[0][1];
+    for (var i = 0; i < steps.length - 1; i++) {
+      var d1 = steps[i][0], t1 = steps[i][1], d2 = steps[i+1][0], t2 = steps[i+1][1];
+      if (d1 <= day && day <= d2) {
+        if (d2 === d1) return t2;
+        return t1 + (t2 - t1) * (day - d1) / (d2 - d1);
+      }
+    }
+    return steps[steps.length - 1][1];
+  }
+  function update() {
+    var text = input.value.trim();
+    if (!text) { preview.textContent = ''; return; }
+    var steps = parse(text);
+    if (!steps.length) { preview.textContent = ''; return; }
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var parts = [];
+    for (var day = 1; day <= 365; day += 30) {
+      var t = interp(steps, day);
+      if (t !== null) {
+        var m = Math.floor((day - 1) / 30);
+        parts.push(months[m] + ' ' + t.toFixed(1) + '°C');
+      }
+    }
+    preview.textContent = 'Preview: ' + parts.join(' → ');
+  }
+  input.addEventListener('input', update);
+  update();
+})();
+</script>
+{% endblock %}

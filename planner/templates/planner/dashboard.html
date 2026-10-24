@@ -1,0 +1,193 @@
+{% extends "planner/base.html" %}
+{% load fmt %}{% load static %}
+{% block title %}{{ scenario.name }} · RAS production planner{% endblock %}
+{% block head %}
+<style>
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr); gap: 12px; }
+@media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+.weekly { max-height: 520px; overflow: auto; }
+.bio { margin-bottom: 16px; border-top: 3px solid var(--accent); }
+.bio-head { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; justify-content: space-between; margin-bottom: 12px; }
+.bio-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bio-form label { color: var(--ink-2); }
+.bio-form input { width: 110px; }
+.bio-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(0, 2.6fr); gap: 24px; }
+.bio-grid > * { min-width: 0; }
+@media (max-width: 1000px) { .bio-grid { grid-template-columns: 1fr; } }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 0; margin: 0; }
+.facts dt, .facts dd { padding: 6px 0; border-bottom: 1px solid var(--grid); }
+.facts dt { color: var(--ink-2); padding-right: 16px; }
+.facts dd { margin: 0; text-align: right; font: 400 13.5px var(--mono); font-variant-numeric: tabular-nums; }
+.facts dd strong { font-weight: 500; color: var(--accent); }
+tr.bad td { color: var(--critical); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar">
+  <div>
+    <div class="eyebrow">Library · Single batch (Excel check)</div>
+    <h1>{{ scenario.name }}</h1>
+    <div class="sub">{{ chart.day|length }} days · {% if scenario.temperature_steps %}temperature profile {{ scenario.temperature_steps }}{% else %}constant temperature{% endif %} · {% if scenario.use_feed_catalog and not catalog_empty %}feed table{% else %}default FCR and protein{% endif %}</div>
+  </div>
+  <div class="actions">
+    <a class="btn" href="{% url 'scenario_edit' scenario.pk %}">Edit constants</a>
+    <form method="post" action="{% url 'scenario_copy' scenario.pk %}">{% csrf_token %}<button class="btn">Duplicate</button></form>
+    <a class="btn" href="{% url 'scenario_new' %}">New scenario</a>
+    <a class="btn primary" href="{% url 'export_xlsx' scenario.pk %}">Export to Excel</a>
+  </div>
+</div>
+
+{% if scenario.use_feed_catalog and catalog_empty %}
+<div class="warn">The feed table is empty, so default FCR and protein are used. <a href="{% url 'feeds' %}">Add feeds</a></div>
+{% endif %}
+
+<div class="kpis">
+  <div class="kpi"><div class="k">Final weight</div><div class="v">{{ summary.final_weight_g|num:0 }}<span class="u">g</span></div><div class="n">{{ summary.final_count|num:0 }} fish</div></div>
+  <div class="kpi"><div class="k">Final biomass</div><div class="v">{{ summary.final_biomass_t|num:1 }}<span class="u">t</span></div></div>
+  <div class="kpi"><div class="k">Total feed</div><div class="v">{{ summary.total_feed_t|num:1 }}<span class="u">t</span></div><div class="n">economic FCR {{ summary.economic_fcr|num:2 }}</div></div>
+  <div class="kpi"><div class="k">Peak daily feed</div><div class="v">{{ summary.peak_feed_kg|num:0 }}<span class="u">kg/day</span></div></div>
+  <div class="kpi"><div class="k">Max. tank volume needed</div><div class="v">{{ summary.peak_volume_m3|num:0 }}<span class="u">m³</span></div></div>
+  <div class="kpi"><div class="k">Design flow (peak)</div><div class="v">{{ summary.peak_q_design_m3h|num:0 }}<span class="u">m³/h</span></div><div class="n">largest flow demand</div></div>
+  <div class="kpi"><div class="k">Peak O₂ demand</div><div class="v">{{ summary.peak_o2_kgd|num:0 }}<span class="u">kg/day</span></div></div>
+  <div class="kpi"><div class="k">O₂ flow meter (peak, actual dose)</div><div class="v">{{ summary.peak_o2_lpm_actual|num:0 }}<span class="u">Nl/min (0 °C)</span></div><div class="n">incl. diffuser efficiency</div></div>
+  <div class="kpi"><div class="k">Peak ozone</div><div class="v">{{ summary.peak_ozone_kgd|num:1 }}<span class="u">kg/day</span></div></div>
+  <div class="kpi"><div class="k">Ozone flow meter (peak)</div><div class="v">{{ summary.peak_ozone_lpm|num:1 }}<span class="u">Nl/min (0 °C, pure O₃)</span></div></div>
+</div>
+
+<div class="charts">
+  <div class="card chart"><h2>Fish weight</h2><div class="unit">g per fish</div><div class="box"><canvas id="c-weight"></canvas></div></div>
+  <div class="card chart"><h2>Biomass</h2><div class="unit">t</div><div class="box"><canvas id="c-biomass"></canvas></div></div>
+  <div class="card chart"><h2>Daily feed</h2><div class="unit">kg/day</div><div class="box"><canvas id="c-feed"></canvas></div></div>
+  <div class="card chart"><h2>Required tank volume</h2><div class="unit">m³ (biomass ÷ stocking density)</div><div class="box"><canvas id="c-volume"></canvas></div></div>
+  <div class="card chart"><h2>Flow demands</h2><div class="unit">m³/h — the design flow is the largest</div>
+    <div class="legend"><span><i style="background:var(--s1)"></i>O₂</span><span><i style="background:var(--s2)"></i>TAN</span><span><i style="background:var(--s3)"></i>CO₂</span><span><i style="background:var(--s4)"></i>TSS</span></div>
+    <div class="box"><canvas id="c-flows"></canvas></div></div>
+  <div class="card chart"><h2>Stocking density</h2><div class="unit">kg/m³ (max. {{ scenario.engine_params.growth.max_density|num:0 }})</div><div class="box"><canvas id="c-density"></canvas></div></div>
+</div>
+
+<section class="card bio" id="biofilter">
+  <div class="bio-head">
+    <div><h2>Biofilter design point</h2>
+      <div class="sub">Enter a fish weight. The feed, tank volume, temperature and protein on the day the fish reach it feed the biofilter sizing.</div></div>
+    <form method="post" action="{% url 'biofilter_design' scenario.pk %}" class="bio-form">{% csrf_token %}
+      <label for="dw">Fish weight</label>
+      <input id="dw" type="number" step="any" min="0" name="design_weight_g" value="{% if bio_info %}{{ bio_bp.design_weight_g|stringformat:'g' }}{% endif %}" placeholder="e.g. 5">
+      <span class="sub">g</span>
+      <button class="btn primary">Size biofilter</button>
+      {% if bio_info %}<button class="btn" name="design_weight_g" value="0">Unlink</button>{% endif %}
+    </form>
+  </div>
+  {% if bio_info %}
+    {% if not bio_info.reached %}<div class="warn">Fish do not reach {{ bio_bp.design_weight_g|num:0 }} g within the simulation; the last day (day {{ bio_info.day }}, {{ bio_info.weight_g|num:0 }} g) is used.</div>{% endif %}
+    {% if bio_negative %}<div class="warn crit">Tank retention limits — hard limit: <strong>{{ bio_info.max_retention_min|num:1 }} min</strong> · design limit ({{ bio_bp.max_removal_pct|num:0 }} % per pass): <strong>{{ bio_design_retention|num:0 }} min</strong>. Beyond the hard limit the flow cannot hold tank TAN at {{ bio_bp.tan_target|num:1 }} mg/L; the design limit is what a biofilter can actually do per pass, and media volume climbs steeply as you approach it.</div>{% endif %}
+    {% for n in bio_notes %}<div class="warn">{{ n }}</div>{% endfor %}
+    <div class="bio-grid">
+      <div>
+        <h3>From the simulation (day {{ bio_info.day }})</h3>
+        <dl class="facts">
+          <dt>Fish weight</dt><dd>{{ bio_info.weight_g|num:2 }} g</dd>
+          <dt>Fish</dt><dd>{{ bio_info.count|num:0 }}</dd>
+          <dt>Biomass</dt><dd>{{ bio_info.biomass_kg|num:0 }} kg</dd>
+          <dt>Stocking density</dt><dd>{{ bio_info.density|num:1 }} kg/m³</dd>
+          <dt>Water temperature</dt><dd>{{ bio_info.temperature|num:1 }} °C</dd>
+          <dt>Feed / protein</dt><dd>{{ bio_info.feed_name|default:"default" }} · {{ bio_info.protein|pct:0 }}%</dd>
+          <dt>Daily feed (farm)</dt><dd>{{ bio_info.farm_feed_kg|num:1 }} kg/day</dd>
+          <dt>Daily feed (per unit)</dt><dd>{{ bio_info.unit_feed_kg|num:1 }} kg/day</dd>
+          <dt>Design feed (× {{ bio_bp.feed_safety_factor|num:2 }})</dt><dd><strong>{{ bio_info.design_feed_kg|num:1 }} kg/day</strong></dd>
+          <dt>Required tank volume (farm)</dt><dd>{{ bio_info.farm_volume_m3|num:1 }} m³</dd>
+          <dt>Tank volume (per unit)</dt><dd><strong>{{ bio_info.unit_volume_m3|num:1 }} m³</strong></dd>
+          <dt>Tanks</dt><dd>{{ bio_info.n_tanks }} × {{ bio_info.tank_volume_m3|num:2 }} m³</dd>
+          <dt>RAS units</dt><dd>{{ bio_info.units }}</dd>
+          <dt>Max. tank retention</dt><dd><strong>{{ bio_info.max_retention_min|num:1 }} min</strong></dd>
+        </dl>
+        <p class="note">Change unit and tank counts, safety factor and media properties on the <a href="{% url 'biofilter' scenario.pk %}">Biofilter</a> page.</p>
+      </div>
+      <div class="tablewrap">
+        <h3>Biofilter by tank retention time (per RAS unit)</h3>
+        <table class="data">
+          <thead><tr><th>Retention min</th><th>Flow m³/h</th><th>Outlet TAN mg/L</th><th>Efficiency %</th><th>Media salt m³</th><th>Media fresh m³</th><th>Biofilter salt m³</th><th>Biofilter fresh m³</th><th>Residence salt min</th><th>Residence fresh min</th></tr></thead>
+          <tbody>{% for r in bio_rows %}{% if r.feasible %}<tr><td>{{ r.retention_min|num:0 }}</td><td>{{ r.q_tank_m3h|num:1 }}</td><td>{{ r.tan_out|num:3 }}</td><td>{{ r.efficiency_pct|num:1 }}</td>
+            <td>{{ r.media_salt_m3|num:2 }}</td><td>{{ r.media_fresh_m3|num:2 }}</td><td>{{ r.volume_salt_m3|num:2 }}</td><td>{{ r.volume_fresh_m3|num:2 }}</td><td>{{ r.residence_salt_min|num:1 }}</td><td>{{ r.residence_fresh_min|num:1 }}</td></tr>
+            {% else %}<tr class="bad"><td>{{ r.retention_min|num:0 }}</td><td>{{ r.q_tank_m3h|num:1 }}</td><td colspan="8" class="l">Not feasible: {{ r.reason }}</td></tr>{% endif %}{% endfor %}</tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <p class="sub" style="margin:8px 0 0">No design weight yet. The manual values on the Biofilter page are used.</p>
+  {% endif %}
+</section>
+
+<div class="two">
+  <div class="card">
+    <h2>Feed use</h2>
+    <table class="data">
+      <tr><th>Feed</th><th>Total (t)</th></tr>
+      {% for name, kg in feeds_used %}<tr><td>{{ name }}</td><td>{{ kg|num:2 }}</td></tr>{% endfor %}
+    </table>
+    <p class="note">Each day's feed is picked from the feed table by the fish weight at the start of that day.</p>
+  </div>
+  <div class="card">
+    <h2>Weekly summary</h2>
+    <div class="tablewrap weekly">
+    <table class="data">
+      <thead><tr><th>Week</th><th>Day</th><th>°C</th><th>Weight g</th><th>Fish</th><th>Biomass t</th><th>Volume m³</th><th class="l">Feed</th><th>Feed kg/day</th><th>Feeding rate %</th><th>O₂ kg/day</th><th>O₂ Nl/min (0 °C)</th><th>Ozone g/kg</th><th>Ozone Nl/min (0 °C, pure O₃)</th><th>Q O₂ m³/h</th><th>Q TAN m³/h</th><th>Q CO₂ m³/h</th><th>Q TSS m³/h</th><th>NO₃ water m³/day</th><th>Backflush 60 µm m³/day</th></tr></thead>
+      <tbody>
+      {% for r in weeks %}
+      <tr><td>{% widthratio r.day 7 1 %}</td><td>{{ r.day }}</td><td>{{ r.temperature|num:1 }}</td><td>{{ r.weight_g|num:1 }}</td><td>{{ r.count|num:0 }}</td><td>{{ r.biomass_t|num:2 }}</td><td>{{ r.volume_m3|num:0 }}</td><td class="l">{{ r.feed_name|default:"–" }}</td><td>{{ r.feed_kg|num:1 }}</td><td>{{ r.feed_rate|pct:2 }}</td><td>{{ r.o2_kgd|num:1 }}</td><td>{{ r.o2_lpm_actual|num:1 }}</td><td>{{ r.ozone_dose|num:0 }}</td><td>{{ r.ozone_lpm|num:2 }}</td><td>{{ r.q_o2_m3h|num:0 }}</td><td>{{ r.q_tan_m3h|num:0 }}</td><td>{{ r.q_co2_m3h|num:0 }}</td><td>{{ r.q_tss_m3h|num:0 }}</td><td>{{ r.q_no3_m3d|num:1 }}</td><td>{{ r.backflush60_m3d|num:1 }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="note">O₂ and ozone Nl/min (0 °C) values are for sizing flow meters. Export to Excel for every day.</p>
+  </div>
+</div>
+{{ chart|json_script:"chart-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'vendor/chart.umd.min.js' %}"></script>
+<script>
+const D = JSON.parse(document.getElementById('chart-data').textContent);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d = 1) => v == null ? '–' : v.toLocaleString('en-US', { maximumFractionDigits: d });
+Chart.defaults.font.family = css('--mono');
+Chart.defaults.font.size = 11;
+
+function line(id, series, digits) {
+  new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels: D.day, datasets: series.map(s => ({
+      label: s.label, data: D[s.key], borderColor: css(s.color), backgroundColor: css(s.color),
+      borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2,
+      pointHoverBorderColor: css('--surface'), tension: 0 })) },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { backgroundColor: css('--surface'), titleColor: css('--ink'), bodyColor: css('--ink-2'),
+          borderColor: css('--axis'), borderWidth: 1, padding: 10, boxWidth: 10, boxHeight: 3,
+          callbacks: { title: i => `Day ${i[0].label}`,
+                       label: i => ` ${i.dataset.label}: ${fmt(i.parsed.y, digits)}` } }
+      },
+      scales: {
+        x: { type: 'linear', min: 1, max: D.day[D.day.length - 1],
+             ticks: { color: css('--muted'), maxTicksLimit: 8, includeBounds: false, callback: v => `day ${v}` },
+             grid: { display: false }, border: { color: css('--axis') } },
+        y: { beginAtZero: true, ticks: { color: css('--muted'), maxTicksLimit: 5, callback: v => fmt(v, 1) },
+             grid: { color: css('--grid') }, border: { display: false } }
+      }
+    }
+  });
+}
+
+line('c-weight', [{ key: 'weight_g', label: 'Weight (g)', color: '--s1' }], 1);
+line('c-biomass', [{ key: 'biomass_t', label: 'Biomass (t)', color: '--s1' }], 2);
+line('c-feed', [{ key: 'feed_kg', label: 'Feed (kg/day)', color: '--s1' }], 1);
+line('c-volume', [{ key: 'volume_m3', label: 'Volume (m³)', color: '--s1' }], 0);
+line('c-flows', [
+  { key: 'q_o2_m3h', label: 'O₂', color: '--s1' }, { key: 'q_tan_m3h', label: 'TAN', color: '--s2' },
+  { key: 'q_co2_m3h', label: 'CO₂', color: '--s3' }, { key: 'q_tss_m3h', label: 'TSS', color: '--s4' }], 0);
+line('c-density', [{ key: 'density', label: 'Density (kg/m³)', color: '--s1' }], 1);
+</script>
+{% endblock %}

@@ -1,0 +1,349 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Jet oxygenator{% endblock %}
+{% block head %}
+<style>
+.jet { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+@media (max-width: 1100px) { .jet { grid-template-columns: 1fr; } }
+.jet-in { position: sticky; top: 12px; }
+.jet-in fieldset { border: 0; border-top: 1px solid var(--line); margin: 0 0 var(--sp-3); padding: var(--sp-2) 0 0; }
+.jet-in legend { font: 600 10.5px var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); padding-right: 6px; }
+.jet-in .fr { display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 2px 8px; align-items: center; padding: 3px 0; }
+.jet-in .fr span { font-size: 12.5px; color: var(--ink-2); }
+.jet-in .fr em { font-style: normal; color: var(--muted); font: 400 11px var(--mono); }
+.jet-in .fr input, .jet-in .fr select { padding: 4px 7px; }
+.jet-in .fr .help { grid-column: 1 / -1; font-size: 11px; color: var(--muted); margin-top: -2px; }
+.jet-in .fr.wide { grid-template-columns: 1fr; }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-3); }
+table.elev { width: 100%; }
+table.elev td { white-space: normal; }
+table.elev td:last-child { font-family: var(--mono); text-align: right; }
+.three { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+td.nv { color: var(--ok); }
+.drawings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); }
+@media (max-width: 1200px) { .drawings { grid-template-columns: 1fr; } }
+.drawings figure { margin: 0; min-width: 0; }
+.drawings figcaption { font: 600 10.5px var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 6px; }
+.drawings svg { width: 100%; height: auto; display: block; background: var(--inset); border: 1px solid var(--line); border-radius: var(--radius); }
+.drawings svg text { font-family: var(--mono); fill: var(--ink-2); }
+.drawings .plate { fill: var(--panel-2); stroke: var(--ink-2); stroke-width: 1.5; }
+.drawings .hole { fill: var(--accent); }
+.drawings .spare { fill: none; stroke: var(--accent); stroke-width: 1; }
+.drawings .baffle { stroke: var(--warn); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.drawings .dim { stroke: var(--muted); stroke-width: 1; }
+.drawings .wall { fill: none; stroke: var(--ink-2); stroke-width: 2.5; }
+.drawings .water { fill: var(--accent); opacity: 0.18; }
+.drawings .gas { fill: var(--warn); opacity: 0.12; }
+.drawings .jetline { stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 2 3; }
+.drawings .lvl { stroke: var(--accent); stroke-width: 1; }
+.drawings .floor { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Library · Calculator</div><h1>Jet platform oxygenator</h1>
+  <div class="sub">Pre-sizing of a jet-plate oxygenator: water falls through nozzles into a pure-oxygen gas cushion, the gas passes the compartments in series. Gives nozzles and plate, levels, oxygen transfer efficiency for target outlet O₂, feed gas, vent, total gas pressure and energy. Efficiency is calibrated to the FOX France Oxygénation jet-platform table; confirm on a prototype (vent gas flow and its O₂ %).</div></div></div>
+
+<div class="jet">
+<form method="get" class="card jet-in">
+  {% for group, fields in groups %}
+  <fieldset><legend>{{ group }}</legend>
+    {% for f in fields %}
+    <label class="fr{% if f.name == 'targets' %} wide{% endif %}"><span>{{ f.label }}{% if f.unit %} <em>[{{ f.unit }}]</em>{% endif %}</span>
+      <input type="{% if f.name == 'targets' %}text{% else %}number{% endif %}" step="any" name="{{ f.name }}" value="{{ f.value }}"{% if f.name == 'flow_m3h' %} required{% endif %}>
+      {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}</label>
+    {% endfor %}
+    {% if group == "Platform" %}
+    <label class="fr"><span>Plate shape</span><select name="shape">{% for k, label in shapes %}<option value="{{ k }}" {% if k == shape %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label class="fr"><span>Nozzle type</span><select name="nozzle_type">{% for k, label in nozzle_labels %}<option value="{{ k }}" {% if k == nozzle_type %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    {% endif %}
+  </fieldset>
+  {% endfor %}
+  <button class="btn primary" type="submit" style="width:100%; justify-content:center">Calculate</button>
+</form>
+
+<div>
+{% if error %}<div class="msg err">{{ error }}</div>{% endif %}
+{% if r %}
+<div class="kpis">
+  <div class="kpi"><div class="k">Nozzles</div><div class="v">{{ r.nozzle.holes }}<span class="u">× Ø{{ r.nozzle.d_mm|num:0 }} mm</span></div><div class="n">{{ r.nozzle.holes_needed|num:0 }} needed + spare</div></div>
+  <div class="kpi"><div class="k">Plate</div><div class="v">{{ r.nozzle.W_mm|num:0 }} × {{ r.nozzle.L_mm|num:0 }}<span class="u">mm</span></div><div class="n">{{ r.inputs.compartments }} compartments × {{ r.nozzle.rows }} rows × {{ r.nozzle.cols }}</div></div>
+  <div class="kpi"><div class="k">Compartment efficiency E</div><div class="v">{{ r.transfer.E|num:3 }}</div><div class="n">{% if r.transfer.E_measured %}measured{% else %}FOX calibration, corrected{% endif %}{% if r.transfer.E_opt %} · optimistic {{ r.transfer.E_opt|num:3 }}{% endif %}</div></div>
+  <div class="kpi"><div class="k">No-vent operation</div><div class="v">{% if r.transfer.novent %}{{ r.transfer.O_novent|num:1 }}<span class="u">mg/L</span>{% else %}–{% endif %}</div><div class="n">{% if r.transfer.novent %}efficiency ~100 % up to here{% else %}none: inlet total gas pressure above the cushion pressure{% endif %}</div></div>
+  <div class="kpi"><div class="k">Water depth needed</div><div class="v">{{ r.levels.depth_needed|num:2 }}<span class="u">m</span></div><div class="n">box height ~{{ r.levels.box_height|num:2 }} m</div></div>
+</div>
+
+<section class="card section">
+  <h2>Drawing</h2>
+  <div class="drawings">
+    <figure><figcaption>Plan view of the nozzle plate</figcaption><div id="plan"></div></figure>
+    <figure><figcaption>Section (levels in m; tank water level = 0.00)</figcaption><div id="section"></div></figure>
+  </div>
+  <p class="note">● open nozzle · ○ spare hole (plugged, opened when needed) · dashed lines: compartment baffles — the gas passes the compartments in order {% if r.drawing.shape == 'round' %}around the plate{% else %}across the plate{% endif %}. Drawn to scale.</p>
+</section>
+{{ r.drawing|json_script:"jet-drawing" }}{{ r.levels|json_script:"jet-levels" }}
+
+<section class="card section">
+  <h2>Oxygen transfer by target</h2>
+  <div class="tablewrap"><table class="data">
+    <thead><tr><th>Target mg/L</th><th>Saturation %</th><th>Efficiency % ({{ r.inputs.compartments }} c.)</th><th>Efficiency % (1 c.)</th>{% if r.transfer.E_opt %}<th>Optimistic %</th>{% endif %}
+      <th>O₂ kg/h</th><th>Gas Nl/min</th><th>Vent Nl/min</th><th>N₂ out %</th><th>TGP %</th><th>kWh/kg (pump)</th></tr></thead>
+    <tbody>{% for x in r.rows %}<tr>
+      <td>{{ x.target|num:1 }}</td><td>{{ x.sat_pct|num:0 }}</td>
+      {% if x.reachable %}
+      <td{% if x.novent %} class="nv" title="no vent: all the oxygen dissolves"{% endif %}>{{ x.ae_pct|num:1 }}{% if x.novent %} *{% endif %}</td>
+      <td>{% if x.ae1_pct is not None %}{{ x.ae1_pct|num:1 }}{% else %}unreachable{% endif %}</td>
+      {% if r.transfer.E_opt %}<td>{% if x.ae_opt_pct is not None %}{{ x.ae_opt_pct|num:1 }}{% else %}unreachable{% endif %}</td>{% endif %}
+      <td>{{ x.o2_kgh|num:2 }}</td><td>{{ x.gas_nlmin|num:1 }}</td><td>{{ x.vent_nlmin|num:2 }}</td><td>{{ x.n2_out_pct|num:0 }}</td><td>{{ x.tgp_pct|num:1 }}</td><td>{{ x.kwh_per_kg|num:2 }}</td>
+      {% else %}<td colspan="{% if r.transfer.E_opt %}9{% else %}8{% endif %}" class="l" style="color:var(--alarm)">unreachable</td>{% endif %}
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="note">* no vent (all the oxygen dissolves) · efficiency = dissolved O₂ / O₂ fed · Nl/min at 15 °C, 1 atm, dry gas · gas pressure {{ r.transfer.P_atm|num:3 }} atm (site {{ r.transfer.Pb_atm|num:3 }} atm), feed gas {{ r.inputs.o2_purity_pct|num:1 }} % O₂ · theoretical ceiling {{ r.transfer.O_max|num:1 }} mg/L.
+    Hydraulic power if the head is pumped: {{ r.hydraulic_w|num:0 }} W, electric ~{{ r.electric_w|num:0 }} W.</p>
+</section>
+
+<div class="three">
+  <section class="card"><h2>Nozzles and plate</h2>
+    <dl class="kv">
+      <dt>Nozzle</dt><dd>Ø{{ r.nozzle.d_mm|num:0 }} mm · Cd {{ r.nozzle.Cd|num:2 }} · Cv {{ r.nozzle.Cv|num:2 }}</dd>
+      <dt>Flow per hole</dt><dd>{{ r.nozzle.q_ls|num:3 }} L/s · {{ r.nozzle.q_m3h|num:2 }} m³/h</dd>
+      <dt>Holes</dt><dd>{{ r.nozzle.holes_needed|num:0 }} needed → {{ r.nozzle.holes }} on the plate</dd>
+      <dt>Layout</dt><dd>{{ r.inputs.compartments }} × {{ r.nozzle.rows }} rows × {{ r.nozzle.cols }}, pitch {{ r.nozzle.pitch_mm|num:0 }} mm</dd>
+      <dt>Plate</dt><dd>{{ r.nozzle.W_mm|num:0 }} × {{ r.nozzle.L_mm|num:0 }} mm = {{ r.nozzle.area_m2|num:3 }} m²</dd>
+      <dt>Compartment width</dt><dd>{{ r.nozzle.compartment_mm|num:0 }} mm</dd>
+      <dt>Downward velocity</dt><dd>{{ r.nozzle.U|num:3 }} m/s (limit {{ r.nozzle.U_max|num:3 }})</dd>
+      <dt>Screen</dt><dd>≤ {{ r.nozzle.screen_mm|num:0 }} mm mesh</dd>
+    </dl>
+    <h3 style="margin-top:12px">Diameter options</h3>
+    <dl class="kv">{% for o in r.nozzle.options %}<dt>Ø{{ o.d_mm|num:0 }} mm</dt><dd>{{ o.holes }} holes · jet/diameter {{ o.jet_ratio|num:0 }}</dd>{% endfor %}</dl>
+  </section>
+  <section class="card"><h2>Jets</h2>
+    <dl class="kv">
+      <dt>Head on the holes</dt><dd>{{ r.jets.h0|num:2 }} m (head − cushion)</dd>
+      <dt>Nozzle exit velocity</dt><dd>{{ r.jets.v0|num:2 }} m/s</dd>
+      <dt>Impact velocity</dt><dd>{{ r.jets.vi|num:2 }} m/s</dd>
+      <dt>Jet length / diameter</dt><dd>{{ r.jets.jet_ratio|num:0 }}</dd>
+      <dt>Bubble cloud depth</dt><dd>~{{ r.jets.penetration_m|num:2 }} m (estimate)</dd>
+      <dt>Baffles below the inner surface</dt><dd>{{ r.jets.baffle_m|num:2 }} m {% if r.jets.baffle_given %}(given){% else %}(1.5 × cloud){% endif %}</dd>
+      <dt>Skirt below the inner surface</dt><dd>{{ r.jets.skirt_m|num:2 }} m {% if r.jets.skirt_given %}(given){% else %}(2 × cloud){% endif %}</dd>
+      <dt>Baffle plate height (from the nozzle plate)</dt><dd>{{ r.jets.baffle_plate_m|num:2 }} m</dd>
+    </dl>
+  </section>
+  <section class="card"><h2>Levels <span class="note" style="font-size:11px; text-transform:none; letter-spacing:0">outlet water level = 0.00 m</span></h2>
+    <table class="data elev"><tbody>
+      <tr><td>Feed water level</td><td>+{{ r.levels.feed|num:2 }} m{% if r.inputs.tank_margin_m %} (max +{{ r.levels.top|num:2 }}){% endif %}</td></tr>
+      <tr><td>Overflow weir / wall top</td><td>+{{ r.levels.weir|num:2 }} / +{{ r.levels.wall|num:2 }} m</td></tr>
+      <tr><td>Nozzle plate (underside)</td><td>{{ r.levels.plate|num:2 }} m · {{ r.levels.water_on_plate|num:2 }} m water on it</td></tr>
+      <tr><td>Inner water surface / vent</td><td>{{ r.levels.inner|num:2 }} m · gas {{ r.levels.gas_mbar|num:0 }} mbar</td></tr>
+      <tr><td>Compartment baffle bottom</td><td>{{ r.levels.baffle|num:2 }} m</td></tr>
+      <tr><td>Skirt bottom</td><td>{{ r.levels.skirt|num:2 }} m</td></tr>
+      <tr><td>Water depth needed</td><td>{{ r.levels.depth_needed|num:2 }} m</td></tr>
+      <tr><td>Gas cushion volume</td><td>{{ r.levels.cushion_l|num:0 }} L</td></tr>
+    </tbody></table>
+    <h3 style="margin-top:12px">In the tank</h3>
+    <table class="data elev"><tbody>
+      <tr><td>Head: water in the box above the tank water</td><td>{{ r.levels.feed|mm }} mm</td></tr>
+      <tr><td>Submergence: inner surface below the tank water</td><td>{{ r.levels.submergence|mm }} mm</td></tr>
+      <tr><td>Box (plan)</td><td>{% if r.drawing.shape == 'round' %}Ø {{ r.drawing.D|num:0 }} mm{% else %}{{ r.drawing.W|num:0 }} × {{ r.drawing.L|num:0 }} mm{% endif %}</td></tr>
+      <tr><td>Box height (wall top to skirt bottom)</td><td>{{ r.levels.box_height|mm }} mm</td></tr>
+      <tr><td>Top of the box above the tank water</td><td>{{ r.levels.wall|mm }} mm</td></tr>
+      <tr><td>Skirt bottom below the tank water</td><td>{{ r.levels.skirt|neg_mm }} mm</td></tr>
+      <tr><td>Free space under the skirt</td><td>{{ r.drawing.clear_m|mm }} mm</td></tr>
+      <tr><td>Water depth needed below the tank water</td><td>{% if r.fit and not r.fit.ok %}{{ r.fit.needed_m|mm }}{% else %}{{ r.levels.depth_needed|mm }}{% endif %} mm</td></tr>
+      {% if r.fit %}<tr><td>Fits the tank ({{ r.fit.available_m|mm }} mm of water)?</td>
+        <td>{% if r.fit.ok %}<span class="status ok">fits</span>{% else %}<span class="status bad">too shallow · needs {{ r.fit.needed_m|mm }}</span>{% endif %}</td></tr>{% endif %}
+    </tbody></table>
+    {% if r.fit and not r.fit.ok %}<div class="warn" style="margin-top:8px"><b>Ways to fit:</b><ul style="margin:4px 0 0; padding-left:18px">{% for o in r.fit.options %}<li>{{ o }}</li>{% endfor %}</ul></div>{% endif %}
+    <p class="note">Oxygen enters the gas cushion of compartment C1 through the side wall; the vent leaves from C{{ r.inputs.compartments }}.</p>
+  </section>
+</div>
+
+{% if r.valves %}
+<section class="card section"><h2>Gate valves for the flow range</h2>
+  {% if r.valves.ok %}
+  <p class="sub" style="margin-top:0">{{ r.nozzle.cols }} holes per row = {{ r.valves.q_row|num:1 }} m³/h at the design head. Efficiency at {{ r.valves.ref_target|num:1 }} mg/L, at the lowest feed tank level of each band.</p>
+  <div class="tablewrap"><table class="data">
+    <thead><tr><th>Open rows</th><th>Flow band m³/h</th><th>Feed tank level m</th><th>E</th><th>Efficiency %</th><th class="l"></th></tr></thead>
+    <tbody>{% for b in r.valves.bands %}<tr><td>{{ b.open_rows }}</td><td>{{ b.q_lo|num:0 }} – {{ b.q_hi|num:0 }}</td><td>{{ b.level_lo|num:2 }} … {{ b.level_hi|num:2 }}</td><td>{{ b.E|num:2 }}</td><td>{% if b.ae_pct is not None %}{{ b.ae_pct|num:1 }}{% else %}–{% endif %}</td><td class="l">{% if b.some_closed %}some compartments closed{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="note">Always open: {{ r.valves.fixed_rows }} rows · gated: {{ r.valves.gated_rows }} (of which {{ r.valves.spare_rows }} spare). Close the gates one row per compartment in turn, so every compartment keeps water; with fewer open rows than compartments only that many compartments work (efficiency shown for them).</p>
+  {% else %}<p class="msg err">The holes on the plate cannot pass this flow.</p>{% endif %}
+</section>
+{% endif %}
+
+{% if r.msgs %}
+<section class="card section"><h2>Warnings</h2>
+  {% for m in r.msgs %}<div class="warn" style="margin-bottom:6px">{{ m }}</div>{% endfor %}
+</section>
+{% endif %}
+{% else %}
+<div class="card"><p class="sub" style="margin:0">Enter the flow and the head, then Calculate. Every field except the flow has a default.</p></div>
+{% endif %}
+</div>
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+{% if r %}
+<script>
+(function () {
+  const D = JSON.parse(document.getElementById('jet-drawing').textContent);
+  const L = JSON.parse(document.getElementById('jet-levels').textContent);
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, parent, text) => { const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; parent.appendChild(e); return e; };
+  const fmt = (v, d = 0) => Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  // dimension line with end ticks and a label; horizontal (vertical = false) or vertical
+  function dim(svg, x1, y1, x2, y2, label, o) {
+    const { sw = 1, fs = 11, vertical = false, side = -1 } = o || {};
+    el('line', { x1, y1, x2, y2, class: 'dim', 'stroke-width': sw }, svg);
+    const t = fs * 0.45;
+    if (vertical) {
+      el('line', { x1: x1 - t, y1, x2: x1 + t, y2: y1, class: 'dim', 'stroke-width': sw }, svg);
+      el('line', { x1: x2 - t, y1: y2, x2: x2 + t, y2, class: 'dim', 'stroke-width': sw }, svg);
+      const ym = (y1 + y2) / 2, xt = x1 + side * fs * 0.4;
+      el('text', { x: xt, y: ym, 'font-size': fs, 'text-anchor': 'middle', transform: `rotate(-90 ${xt} ${ym})` }, svg, label);
+    } else {
+      el('line', { x1, y1: y1 - t, x2: x1, y2: y1 + t, class: 'dim', 'stroke-width': sw }, svg);
+      el('line', { x1: x2, y1: y2 - t, x2, y2: y2 + t, class: 'dim', 'stroke-width': sw }, svg);
+      el('text', { x: (x1 + x2) / 2, y: y1 + side * fs * 0.45, 'font-size': fs, 'text-anchor': 'middle' }, svg, label);
+    }
+  }
+
+  // ---- plan view (mm), with a dimension on each side
+  const W = D.W, H = D.L, pad = Math.max(W, H) * 0.12;
+  const plan = el('svg', { viewBox: `${-pad} ${-pad * 1.2} ${W + 2 * pad} ${H + pad * 2.5}` }, document.getElementById('plan'));
+  const sw = Math.max(W, H) / 400;   // stroke scale so lines look the same at any size
+  if (D.shape === 'round') el('circle', { cx: W / 2, cy: H / 2, r: W / 2, class: 'plate', 'stroke-width': 1.5 * sw }, plan);
+  else el('rect', { x: 0, y: 0, width: W, height: H, class: 'plate', 'stroke-width': 1.5 * sw }, plan);
+  for (const b of D.baffles) el('line', { x1: b[0], y1: b[1], x2: b[2], y2: b[3], class: 'baffle', 'stroke-width': 1.5 * sw,
+    'stroke-dasharray': `${6 * sw} ${4 * sw}` }, plan);
+  const r = D.d_mm / 2;
+  for (const h of D.holes) el('circle', { cx: h[0], cy: h[1], r, class: h[3] ? 'spare' : 'hole', 'stroke-width': sw }, plan);
+  const fs = Math.max(W, H) / 32;
+  if (D.shape === 'round') {
+    el('line', { x1: 0, y1: H + pad * 0.5, x2: W, y2: H + pad * 0.5, class: 'dim', 'stroke-width': sw }, plan);
+    el('text', { x: W / 2, y: H + pad * 0.5 + fs * 1.1, 'text-anchor': 'middle', 'font-size': fs }, plan, `Ø ${fmt(D.D)} mm`);
+  } else {
+    el('line', { x1: 0, y1: H + pad * 0.9, x2: W, y2: H + pad * 0.9, class: 'dim', 'stroke-width': sw }, plan);
+    el('text', { x: W / 2, y: H + pad * 0.9 + fs * 1.1, 'text-anchor': 'middle', 'font-size': fs }, plan, `${fmt(W)} mm`);
+    el('line', { x1: W + pad * 0.5, y1: 0, x2: W + pad * 0.5, y2: H, class: 'dim', 'stroke-width': sw }, plan);
+    el('text', { x: W + pad * 0.5 + fs * 0.4, y: H / 2, 'font-size': fs, transform: `rotate(90 ${W + pad * 0.5 + fs * 0.4} ${H / 2})`, 'text-anchor': 'middle' }, plan, `${fmt(H)} mm`);
+  }
+  // compartment numbers in gas order
+  const n = D.n;
+  for (let c = 0; c < n; c++) {
+    let x, y;
+    if (D.shape === 'round') { const a = (c + 0.5) * 2 * Math.PI / n; x = W / 2 + Math.cos(a) * W * 0.5 + Math.cos(a) * fs * 0.9; y = H / 2 + Math.sin(a) * H * 0.5 + Math.sin(a) * fs * 0.9 + fs * 0.35; }
+    else { x = (c + 0.5) * W / n; y = -fs * 0.5; }
+    el('text', { x, y, 'text-anchor': 'middle', 'font-size': fs * 0.85 }, plan, `C${c + 1}`);
+  }
+
+  // oxygen inlet into C1 and the vent from the last compartment (side wall, at the gas cushion)
+  {
+    const al = Math.max(W, H) * 0.09, aw = sw * 2.2;
+    el('defs', {}, plan).innerHTML = `<marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warn)"/></marker>`;
+    let inP, outP;
+    if (D.shape === 'round') {
+      const a1 = 0.5 * 2 * Math.PI / n, an = (n - 0.5) * 2 * Math.PI / n, R = W / 2;
+      inP = [W / 2 + Math.cos(a1) * (R + al), H / 2 + Math.sin(a1) * (R + al), W / 2 + Math.cos(a1) * R, H / 2 + Math.sin(a1) * R];
+      outP = [W / 2 + Math.cos(an) * R, H / 2 + Math.sin(an) * R, W / 2 + Math.cos(an) * (R + al), H / 2 + Math.sin(an) * (R + al)];
+    } else {
+      inP = [-al, H * 0.22, 0, H * 0.22];
+      outP = [W, H * 0.22, W + al, H * 0.22];
+    }
+    el('line', { x1: inP[0], y1: inP[1], x2: inP[2], y2: inP[3], stroke: 'var(--warn)', 'stroke-width': aw, 'marker-end': 'url(#arr)' }, plan);
+    el('line', { x1: outP[0], y1: outP[1], x2: outP[2], y2: outP[3], stroke: 'var(--warn)', 'stroke-width': aw, 'marker-end': 'url(#arr)' }, plan);
+    const tin = D.shape === 'round' ? { x: inP[0], a: 'middle' } : { x: -pad * 0.95, a: 'start' };
+    const tout = D.shape === 'round' ? { x: outP[2], a: 'middle' } : { x: W + pad * 0.95, a: 'end' };
+    el('text', { x: tin.x, y: inP[1] - fs * 0.5, 'font-size': fs * 0.75, 'text-anchor': tin.a }, plan, 'O₂ in');
+    el('text', { x: tout.x, y: outP[3] - fs * 0.5, 'font-size': fs * 0.75, 'text-anchor': tout.a }, plan, 'vent');
+  }
+
+  // dimensions on the plate: hole pitch, edge distances, compartment width
+  {
+    const o = { sw, fs: fs * 0.75 };
+    const h0 = D.holes[0];
+    if (D.shape === 'round') {
+      const c = D.holes.reduce((b, h) => Math.hypot(h[0] - W / 2, h[1] - H / 2) < Math.hypot(b[0] - W / 2, b[1] - H / 2) ? h : b, h0);
+      dim(plan, c[0], c[1] - fs * 0.9, c[0] + D.pitch_mm, c[1] - fs * 0.9, `${fmt(D.pitch_mm)}`, o);
+      el('text', { x: W / 2, y: H + pad * 0.5 + fs * 2.2, 'text-anchor': 'middle', 'font-size': fs * 0.75 }, plan,
+         `pitch ${fmt(D.pitch_mm)} mm · ≥ ${fmt(D.edge_side_mm)} mm from the rim · ≥ ${fmt(D.baffle_gap_mm)} mm from a baffle`);
+    } else {
+      // above the plate: one compartment's width; below it: rim to the first hole and the hole pitch across
+      dim(plan, 0, -pad * 0.75, D.compartment_mm, -pad * 0.75, `compartment ${fmt(D.compartment_mm)}`, o);
+      const yb = H + pad * 0.3;
+      dim(plan, 0, yb, h0[0], yb, `${fmt(D.edge_side_mm)}`, { ...o, side: 1.9 });
+      const next = D.holes.find(h => h[2] === h0[2] && Math.abs(h[1] - h0[1]) < 1 && h[0] > h0[0] + 1);
+      if (next) dim(plan, h0[0], yb, next[0], yb, `${fmt(D.pitch_mm)}`, { ...o, side: 1.9 });
+      // left of the plate: end distance and the pitch along the rows
+      const xl = -pad * 0.35;
+      dim(plan, xl, 0, xl, h0[1], `${fmt(D.edge_end_mm)}`, { ...o, vertical: true });
+      const below = D.holes.find(h => h[2] === h0[2] && Math.abs(h[0] - h0[0]) < 1 && h[1] > h0[1] + 1);
+      if (below) dim(plan, xl, h0[1], xl, below[1], `${fmt(D.pitch_mm)}`, { ...o, vertical: true });
+    }
+  }
+
+  // ---- section: levels from the outlet water level (m, up = positive)
+  const top = L.wall, bottom = -L.depth_needed, Wm = W / 1000;
+  const s = 380 / (top - bottom);           // px per m vertically
+  const bw = Math.min(Wm * s, 300), x0 = 215, X = x => x0 + x, Y = z => 20 + (top - z) * s;
+  const outerW = bw + 175;                  // room right of the box for the vent, head and submergence
+  const sec = el('svg', { viewBox: `0 0 ${x0 + outerW + 225} ${(top - bottom) * s + 50}` }, document.getElementById('section'));
+  // water outside (outlet level 0) and the floor
+  el('rect', { x: X(-50), y: Y(0), width: outerW + 50, height: (0 - bottom) * s, class: 'water' }, sec);
+  el('line', { x1: X(-50), y1: Y(bottom), x2: X(outerW), y2: Y(bottom), class: 'floor' }, sec);
+  // feed water in the box above the plate, gas cushion below it down to the inner surface
+  el('rect', { x: X(0), y: Y(L.feed), width: bw, height: (L.feed - L.plate) * s, class: 'water' }, sec);
+  el('rect', { x: X(0), y: Y(L.plate), width: bw, height: (L.plate - L.inner) * s, class: 'gas' }, sec);
+  el('rect', { x: X(0), y: Y(L.inner), width: bw, height: (L.inner - L.skirt) * s, class: 'water' }, sec);
+  // jets
+  const nj = Math.min(14, Math.max(4, Math.round(bw / 18)));
+  for (let i = 0; i < nj; i++) { const x = X((i + 0.5) * bw / nj); el('line', { x1: x, y1: Y(L.plate), x2: x, y2: Y(L.inner) + 14, class: 'jetline' }, sec); }
+  // walls: box from the wall top down to the skirt; plate; baffles
+  el('path', { d: `M${X(0)} ${Y(top)} V${Y(L.skirt)} M${X(bw)} ${Y(top)} V${Y(L.skirt)}`, class: 'wall' }, sec);
+  el('line', { x1: X(0), y1: Y(L.plate), x2: X(bw), y2: Y(L.plate), class: 'wall' }, sec);
+  for (let c = 1; c < n; c++) { const x = X(c * bw / n); el('line', { x1: x, y1: Y(L.plate), x2: x, y2: Y(L.baffle), class: 'baffle' }, sec); }
+  // level marks on the right
+  const marks = [['water in the box', L.feed], ['plate', L.plate], ['tank water level', 0], ['inner surface / vent', L.inner],
+                 ['baffle bottom', L.baffle], ['skirt bottom', L.skirt], ['floor (depth needed)', bottom]]
+                .sort((a, b) => b[1] - a[1]);   // top down, so a plate below the tank water is listed under it
+  // labels that would touch are pushed apart (16 px) and joined to their level by a short leader
+  let lastY = -99;
+  for (const [label, z] of marks) {
+    let y = Y(z); if (y - lastY < 16) y = lastY + 16; lastY = y;
+    el('line', { x1: X(bw) + 4, y1: Y(z), x2: X(outerW), y2: Y(z), class: 'dim' }, sec);
+    el('path', { d: `M${X(outerW)} ${Y(z)} L${X(outerW) + 10} ${y} H${X(outerW) + 14}`, class: 'dim', fill: 'none' }, sec);
+    const zz = Math.abs(z) < 0.005 ? 0 : z;
+    el('text', { x: X(outerW) + 17, y: y + 4, 'font-size': 11, fill: z === 0 ? 'var(--accent)' : 'currentColor' }, sec,
+       `${zz >= 0 ? '+' : ''}${fmt(zz, 2)}  ${label}`);
+  }
+  dim(sec, X(0), Y(top) - 8, X(bw), Y(top) - 8, D.shape === 'round' ? `Ø ${fmt(D.D)} mm` : `${fmt(W)} mm`, { fs: 11 });
+  // dimension chain, mm: what the box needs in the tank
+  const chain = [[top, L.feed, 'freeboard'], [L.feed, L.plate, 'water on plate'], [L.plate, L.inner, 'gas cushion'],
+                 [L.inner, L.baffle, 'baffle'], [L.baffle, L.skirt, 'skirt'], [L.skirt, bottom, 'to floor']];
+  const xc = X(0) - 34;
+  for (const [a, b, label] of chain) {
+    if (a - b < 0.005) continue;
+    dim(sec, xc, Y(a), xc, Y(b), `${fmt((a - b) * 1000)}`, { vertical: true, fs: 10 });
+    if ((a - b) * s > 24) el('text', { x: xc - 30, y: (Y(a) + Y(b)) / 2 + 3, 'font-size': 9, 'text-anchor': 'end' }, sec, label);
+  }
+  dim(sec, X(0) - 150, Y(top), X(0) - 150, Y(L.skirt), `box ${fmt((top - L.skirt) * 1000)} mm`, { vertical: true, fs: 10 });
+  // oxygen in (C1, left wall) and vent (last compartment, right wall), at the gas cushion
+  el('defs', {}, sec).innerHTML = `<marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warn)"/></marker>`;
+  const yc = (Y(L.plate) + Y(L.inner)) / 2;
+  el('line', { x1: X(0) - 22, y1: yc, x2: X(0) + 6, y2: yc, stroke: 'var(--warn)', 'stroke-width': 2, 'marker-end': 'url(#arr2)' }, sec);
+  el('text', { x: X(0) + 4, y: Y(L.inner) + 13, 'font-size': 9.5, fill: 'var(--warn)' }, sec, 'O₂ in (C1)');
+  el('line', { x1: X(bw) - 6, y1: yc, x2: X(bw) + 18, y2: yc, stroke: 'var(--warn)', 'stroke-width': 2, 'marker-end': 'url(#arr2)' }, sec);
+  el('text', { x: X(bw) + 6, y: yc - 7, 'font-size': 9.5, fill: 'var(--warn)' }, sec, `vent (C${n})`);
+  // head and submergence: the water inside the box against the tank water level
+  const xh = X(bw) + 72;
+  dim(sec, xh, Y(L.feed), xh, Y(0), `head ${fmt(L.feed * 1000)} mm`, { vertical: true, fs: 10.5, side: 1.3 });
+  dim(sec, xh, Y(0), xh, Y(L.inner), `${fmt(-L.inner * 1000)}`, { vertical: true, fs: 10, side: 1.3 });
+  el('line', { x1: X(bw), y1: Y(0), x2: X(outerW), y2: Y(0), class: 'lvl', 'stroke-width': 1.5 }, sec);
+  el('text', { x: xh + 18, y: Y(L.inner) - 4, 'font-size': 9 }, sec, 'submergence');
+  dim(sec, X(0) - 178, Y(0), X(0) - 178, Y(bottom), `water depth ${fmt(L.depth_needed * 1000)} mm`, { vertical: true, fs: 10 });
+})();
+</script>
+{% endif %}
+{% endblock %}

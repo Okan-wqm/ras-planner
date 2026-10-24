@@ -1,0 +1,1347 @@
+{% extends "planner/base.html" %}
+{% load fmt %}{% load static %}
+{% block title %}Process diagram · {{ scenario.name }}{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{% static 'vendor/reactflow.css' %}">
+<style>
+main { padding-bottom: 20px; }
+.titlebar { margin-bottom: 14px; padding-bottom: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs a { padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; color: var(--ink-2);
+  background: var(--surface); font: 500 14px var(--display); letter-spacing: 0.02em; }
+.tabs a.on { border-color: var(--c); color: var(--ink); box-shadow: inset 0 -3px 0 var(--c); }
+.editor { display: grid; grid-template-columns: 170px minmax(0, 1fr) 340px; gap: 10px; height: calc(100vh - 190px); min-height: 560px; }
+@media (max-width: 1100px) { .editor { grid-template-columns: 1fr; height: auto; } .canvas { height: 620px; } }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; }
+.palette { padding: 10px; }
+.palette button { display: flex; align-items: center; gap: 7px; width: 100%; margin-bottom: 3px; padding: 3px 6px; min-height: 30px; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); font: 500 12.5px/1.15 var(--body); cursor: pointer; }
+.howto { margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+.howto summary { cursor: pointer; }
+.palette button:hover { border-color: var(--accent); background: var(--surface-2); }
+.pgrp { margin-bottom: 6px; }
+.pgrp h3 { margin: 2px 0 4px; font-size: 11.5px; }
+.pgrp.conn { padding: 6px; border: 1px dashed var(--axis); border-radius: var(--radius); background: var(--surface-2); }
+.pgrp.conn button { background: transparent; border-style: dashed; }
+.conn-note { margin: 8px 0 0; padding: 8px 10px; font-size: 13px; color: var(--ink-2); background: var(--surface-2);
+  border: 1px dashed var(--axis); border-radius: var(--radius); }
+.palette .ps { width: 30px; height: 20px; flex: none; }
+.palette .ps svg { width: 30px; height: 20px; display: block; overflow: visible; }
+.palette .ps .ln { stroke-width: 3; } .palette .ps .thin { stroke-width: 2; }
+.canvas { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.toolbar { position: absolute; z-index: 5; top: 10px; left: 10px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+.toolbar > * { pointer-events: auto; }
+.toolbar .state { margin-left: auto; font: 500 12px var(--mono); padding: 5px 9px; border-radius: 4px; background: var(--surface); border: 1px solid var(--border); }
+.state.ok { color: var(--good); } .state.bad { color: var(--critical); } .state.busy { color: var(--muted); }
+.inspector { padding: 14px; }
+.inspector h2 { margin-bottom: 4px; }
+.inspector .tag { font: 500 11px var(--mono); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+.fld { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; align-items: center; padding: 4px 0; font-size: 13px; color: var(--ink-2); }
+.fld input, .fld select { padding: 4px 7px; font-size: 13px; }
+.sec { margin-top: 14px; }
+.outlet { display: grid; grid-template-columns: minmax(0, 1fr) 92px 78px; gap: 6px; align-items: center; padding: 3px 0; font-size: 13px; color: var(--ink-2); }
+.outlet input, .outlet select { padding: 4px 6px; font-size: 13px; }
+.res { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 0; }
+.res dt, .res dd { padding: 4px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.res dt { color: var(--ink-2); } .res dd { margin: 0; text-align: right; font: 400 13px var(--mono); }
+.res dd.bad { color: var(--critical); }
+.warns { margin: 8px 0 0; padding: 0; list-style: none; }
+.warns li { font-size: 13px; padding: 6px 8px; border-left: 3px solid var(--warn); background: var(--surface-2); margin-bottom: 4px; border-radius: 0 4px 4px 0; }
+.warns li.err { border-left-color: var(--critical); }
+.hint { font-size: 12px; color: var(--muted); }
+
+/* nodes */
+.eq { width: 108px; padding: 6px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink); font-family: var(--body); }
+/* labels may be wider than a small symbol: keep them centred over it */
+.eq .t, .eq .m { width: max-content; min-width: 100%; margin-left: 50%; transform: translateX(-50%); }
+/* keep line weights equal whatever the symbol scale */
+.eq .sym .ln { stroke-width: calc(1.6px * var(--sw, 1)); }
+.eq .sym .thin { stroke-width: calc(1px * var(--sw, 1)); }
+.eq .sym .ring { stroke-width: calc(1.5px * var(--sw, 1)); }
+.eq .sym .thick { stroke-width: calc(3px * var(--sw, 1)); }
+.eq:hover { border-color: var(--border); background: color-mix(in srgb, var(--surface) 80%, transparent); }
+.eq.sel { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+.eq .t { height: 18px; font: 600 12px/18px var(--display); letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.eq .t b { font: 500 11px var(--mono); color: var(--muted); }
+.eq .t .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); margin-right: 4px; vertical-align: 1px; }
+.eq.bad .t .dot { background: var(--critical); }
+.eq .sym { width: 96px; height: 64px; margin: 0 auto; }
+.eq .sym svg { display: block; overflow: visible; }
+.sym .ln { fill: none; stroke: var(--ink-2); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.sym .ln.wt, .sym .wt { fill: var(--c); fill-opacity: 0.16; }
+.sym .wt:not(.ln) { stroke: none; }
+.sym .thin { fill: none; stroke: var(--ink-2); stroke-width: 1; opacity: 0.65; stroke-linecap: round; }
+.sym .thick { stroke-width: 3; }
+.sym .ring { fill: none; stroke: var(--c); stroke-width: 1.5; }
+.sym .fillc, .sym .ln.fillc { fill: var(--c); fill-opacity: 0.85; }
+.sym .fs { fill: var(--c); opacity: 0.8; }
+.sym .lamp { stroke: var(--s7); stroke-width: 3; stroke-linecap: round; }
+.sym .tx { font: 600 10px var(--mono); fill: var(--ink-2); }
+.eq.bad .sym .ln { stroke: var(--critical); }
+.eq .m { height: 26px; overflow: hidden; font: 400 9.5px/13px var(--mono); color: var(--ink-2); text-align: center; white-space: nowrap; }
+.eq .plabel { position: absolute; left: calc(100% + 4px); transform: translateY(-50%); font: 400 9px var(--mono); color: var(--muted); white-space: nowrap; pointer-events: none; }
+.eq .plabel.b { left: auto; transform: none; }
+.react-flow__handle { width: 10px; height: 10px; background: var(--surface); border: 2px solid var(--ink-2); }
+.react-flow__handle-left { left: -6px; }
+.react-flow__edge-textbg { fill: var(--surface); }
+.react-flow__edge-text { font: 500 11px var(--mono); fill: var(--ink); }
+.react-flow__attribution { display: none; }
+.palette button[draggable] { cursor: grab; }
+.palette button:active { cursor: grabbing; }
+.pipe-label { position: absolute; display: flex; align-items: center; gap: 3px; pointer-events: all;
+  font: 500 11px var(--mono); color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 1px 2px 1px 5px; }
+.pipe-label.bad { color: var(--critical); border-color: var(--critical); }
+.pipe-label .pl-body { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; }
+.pipe-label .pl-q { font-size: 9.5px; color: var(--ink-2); white-space: nowrap; }
+.pipe-label.bad .pl-q { color: var(--critical); }
+.showq { display: inline-flex; gap: 3px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 3px 4px 3px 9px; }
+.daybar { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--ink-2);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 3px 9px; }
+.daybar input[type=range] { width: 220px; accent-color: var(--accent); }
+.daybar b { font: 500 12px var(--mono); color: var(--ink); min-width: 10ch; }
+.daybar button { font: 500 11px var(--mono); padding: 3px 7px; border: 1px solid var(--accent); background: none; color: var(--accent); border-radius: 4px; cursor: pointer; }
+.daybar select { font: 500 12px var(--mono); padding: 2px 4px; }
+.daybar input.hr { width: 52px; font: 500 12px var(--mono); padding: 2px 4px; }
+.tankhour { margin: 8px 0 12px; }
+.tankhour .th-name { font: 600 12.5px var(--display); color: var(--ink); }
+.tankhour .th-feed { font: 500 11.5px var(--mono); color: var(--accent); margin: 2px 0 4px; }
+.tankhour .th-feed span { color: var(--ink-2); }
+table.th { width: 100%; border-collapse: collapse; font: 400 11px var(--mono); }
+table.th th { font: 600 9.5px var(--display); letter-spacing: 0.04em; color: var(--muted); text-align: right; padding: 2px 3px; border-bottom: 1px solid var(--border); }
+table.th td { text-align: right; padding: 2px 3px; border-bottom: 1px solid var(--grid); }
+table.th th:first-child, table.th td:first-child { text-align: left; color: var(--ink-2); }
+.daybar .pk { font: 500 11px var(--mono); color: var(--accent); }
+.showq button { font: 500 11px var(--mono); padding: 4px 7px; border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); border-radius: 4px; cursor: pointer; }
+.showq button.on { border-color: var(--accent); color: var(--ink); background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+.pipe-label.sel { border-color: var(--accent); }
+.pipe-label button { border: 0; background: none; color: var(--muted); cursor: pointer; font: 600 14px/1 var(--body); padding: 0 3px; border-radius: 3px; }
+.pipe-label button:hover, .pipe-label.sel button { color: var(--critical); background: var(--surface-2); }
+.react-flow__edgeupdater { cursor: move; }
+/* flow direction: dots run from source to target along every pipe that carries water */
+.flow-dots { fill: none; stroke: var(--surface); stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 0.1 14;
+  animation: pipe-flow 0.8s linear infinite; pointer-events: none; }
+@keyframes pipe-flow { to { stroke-dashoffset: -14.1; } }
+@media (prefers-reduced-motion: reduce) { .flow-dots { animation: none; } }
+.eq.off .sym, .eq.off .m { opacity: 0.4; }
+.pbadge { position: absolute; top: -9px; right: -4px; font: 600 8.5px/1 var(--mono); letter-spacing: 0.06em; padding: 3px 5px;
+  border-radius: 3px; pointer-events: none; white-space: nowrap; }
+.pbadge.off { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--axis); }
+.pbadge.vfd { background: var(--accent); color: var(--accent-ink); }
+.pipe-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: move; }
+.pipe-hit:hover { stroke: var(--accent-soft); }
+.pipe-label { cursor: grab; }
+.pipe-label:active { cursor: grabbing; }
+.pipe-label .grip { color: var(--muted); font-size: 9px; letter-spacing: -2px; margin-right: 2px; }
+.pipe-label.moved .grip { color: var(--accent); }
+.pipe-key { margin-top: 8px; font-size: 12px; color: var(--ink-2); }
+.pipe-key h3 { margin: 0 0 4px; font-size: 11.5px; }
+.pipe-key div { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.btn.anim { gap: 6px; font-size: 13px; cursor: pointer; }
+.btn.anim input { width: auto; margin: 0; }
+.react-flow__handle.gas { background: var(--s7); box-shadow: 0 0 0 1.5px var(--s7); border-radius: 2px; }
+.sym .gasln { stroke: var(--s7); stroke-width: 2; stroke-dasharray: 1 4; fill: none; stroke-linecap: round; }
+/* ports: inlets petrol, outlets orange — everywhere */
+.react-flow__handle { width: 12px; height: 12px; border-width: 2px; }
+.react-flow__handle.target { background: var(--accent); border-color: var(--surface); box-shadow: 0 0 0 1.5px var(--accent); }
+.react-flow__handle.source { background: var(--s2); border-color: var(--surface); box-shadow: 0 0 0 1.5px var(--s2); }
+.react-flow__handle:hover { transform-origin: center; filter: brightness(1.15); box-shadow: 0 0 0 4px var(--accent-soft); }
+.react-flow__handle.connectingto { box-shadow: 0 0 0 5px var(--accent-soft); }
+.port-key { display: flex; gap: 12px; font-size: 12px; color: var(--ink-2); margin: 6px 0 0; }
+.port-key i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; }
+/* connection point */
+.junc { position: relative; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%;
+  border: 1px dashed transparent; }
+.junc .react-flow__handle { width: 5px; height: 5px; border-width: 1px; min-width: 0; min-height: 0; }
+.junc .react-flow__handle-left { left: -3px; } .junc .react-flow__handle-right { right: -3px; }
+.junc .react-flow__handle-top { top: -3px; } .junc .react-flow__handle-bottom { bottom: -3px; }
+.junc .jrole { display: none; }
+.junc.sel .jrole, .junc:hover .jrole { display: block; }
+.junc:hover, .junc.sel { border-color: var(--accent); background: var(--surface); }
+.junc.warn { border-color: var(--warn); }
+.junc .jl { stroke: var(--ink-2); stroke-width: 3; }
+.junc .jc { fill: var(--ink-2); }
+.junc .jname { position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font: 600 10px var(--display); color: var(--ink-2); }
+.junc .jq { font-size: 8.5px !important; }
+.junc .jrole { position: absolute; font: 600 8.5px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; pointer-events: none; }
+.junc .jrole.in { color: var(--accent); } .junc .jrole.out { color: var(--s2); }
+.junc .jrole.top { bottom: calc(100% + 2px); left: calc(50% + 5px); } .junc .jrole.bottom { top: calc(100% + 2px); left: calc(50% + 5px); }
+.junc .jrole.left { right: calc(100% + 5px); top: calc(50% + 2px); } .junc .jrole.right { left: calc(100% + 5px); top: calc(50% + 2px); }
+.junc .jq { position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font: 400 9.5px var(--mono); color: var(--ink-2); }
+.libsave { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.libsave input { font-size: 13px; padding: 5px 8px; }
+ul.lib { list-style: none; margin: 8px 0 0; padding: 0; }
+ul.lib li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+ul.lib li strong { font-weight: 600; }
+ul.lib .acts { display: flex; gap: 4px; flex: none; }
+ul.lib .btn { padding: 4px 9px; font-size: 13px; }
+.empty-canvas { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; z-index: 1;
+  color: var(--muted); font: 500 16px var(--display); letter-spacing: 0.04em; }
+.react-flow__controls button { background: var(--surface); border-color: var(--border); fill: var(--ink); }
+.perf { margin: 4px 0 14px; }
+.perf-sum { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line); border-left: 3px solid var(--muted);
+  border-radius: var(--radius); font-size: 13px; margin-bottom: 8px; background: var(--inset); }
+.perf-sum.ok { border-left-color: var(--ok); } .perf-sum.warn { border-left-color: var(--warn); } .perf-sum.alarm { border-left-color: var(--alarm); }
+.perf-t { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.perf-t th { text-align: right; font: 600 10px var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 3px 4px; border-bottom: 1px solid var(--line-2); }
+.perf-t th:first-child, .perf-t td:first-child { text-align: left; }
+.perf-t td { padding: 4px; border-bottom: 1px solid var(--line); text-align: right; font: 400 12px var(--mono); }
+.perf-t td:first-child { font: 400 12.5px var(--body); color: var(--ink-2); }
+.perf-t td .u { color: var(--muted); font: 400 11px var(--mono); }
+.perf-t .status { font-size: 9.5px; padding: 2px 5px; }
+</style>
+{% if print_mode %}
+<script>document.documentElement.dataset.theme = 'light';  /* report snapshots are always light */</script>
+<style>
+/* snapshot for reports: the drawing only */
+body { display: block; background: #fff; }
+.rail, .titlebar, .tabs, .palette, .inspector, .toolbar, .react-flow__minimap, .react-flow__controls, .react-flow__attribution, .msg { display: none !important; }
+main { padding: 0; }
+.editor { display: block; height: 100vh; min-height: 0; }
+.canvas { height: 100vh; border: 0; background: #fff; }
+.react-flow__edge-textwrapper, .pipe-label button { display: none; }
+</style>
+{% endif %}
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 05 / 09 · Process design</div><h1>Process diagram</h1>
+  <div class="sub">Drag equipment from the left, join outlets to inlets, and set each item's specification on the right. Water in equals water out at every item; each outlet takes m³/h, a share of the inflow, or the rest. Pumps set the flow. Results update as you edit.</div></div></div>
+{% if error %}
+<div class="card err">{{ error }} Fix the production plan first.</div>
+{% else %}
+<div class="tabs" style="margin-bottom:10px">
+  {% for s in stages %}<a href="?ras={{ forloop.counter0 }}" class="{% if forloop.counter0 == index %}on{% endif %}" style="--c: var(--s{{ forloop.counter }})">RAS {{ forloop.counter|stringformat:"02d" }} · {{ s.name }}</a>{% endfor %}
+</div>
+<div id="app"></div>
+<details class="card" id="custom-inputs" style="margin:12px 0">
+  <summary><strong>🎛 Custom Inputs</strong> — manual feed, temperature & flow overrides
+  <span class="mut">(what-if sandbox: solve without saving)</span></summary>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;padding:12px 16px">
+    <label>Daily feed (kg/day) <input type="number" id="ci-feed" step="0.1" min="0" placeholder="auto" style="width:100px"></label>
+    <label>Water temp (°C) <input type="number" id="ci-temp" step="0.1" placeholder="auto" style="width:80px"></label>
+    <label>Fresh water flow (m³/h) <input type="number" id="ci-flow" step="1" min="0" placeholder="auto" style="width:100px"></label>
+    <button type="button" id="ci-solve" class="btn" style="align-self:flex-end">Solve with overrides</button>
+    <button type="button" id="ci-clear" style="align-self:flex-end">Clear</button>
+  </div>
+  <div id="ci-result" style="padding:0 16px 12px;font:400 13px/1.5 monospace;white-space:pre-wrap"></div>
+</details>
+<form id="reset" method="post" action="{{ editor.urls.reset }}" hidden>{% csrf_token %}</form>
+{{ editor|json_script:"editor-data" }}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script src="{% static 'vendor/react.production.min.js' %}"></script>
+<script src="{% static 'vendor/react-dom.production.min.js' %}"></script>
+<script src="{% static 'vendor/reactflow.min.js' %}"></script>
+<script>
+(function () {
+  const app = document.getElementById('app');
+  let E;  // the editor payload; unreadable JSON leaves it undefined and stops here
+  // POSTs editor.urls.reset — the hidden #reset form's action is that same URL and carries the CSRF token
+  const resetDiagram = () => {
+    const form = document.getElementById('reset');
+    if (form) { form.submit(); return; }
+    const f = document.createElement('form');
+    f.method = 'post';
+    f.action = (E && E.urls && E.urls.reset) || window.location.href;
+    document.body.appendChild(f); f.submit();
+  };
+  const showErrorCard = (message) => {  // plain DOM: must work even if React never loaded or E never parsed
+    const card = document.createElement('div'); card.className = 'card err';
+    const p = document.createElement('p'); p.textContent = message;
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn';
+    btn.textContent = 'Reset the diagram'; btn.addEventListener('click', resetDiagram);
+    card.append(p, btn); app.replaceChildren(card);
+  };
+  let data;
+  try {
+    data = JSON.parse(document.getElementById('editor-data').textContent);
+  } catch (err) {
+    showErrorCard('Diagram data could not be read — reset the diagram');
+    return;
+  }
+  E = data;
+  const { useState, useEffect, useMemo, useRef, useCallback } = React;
+  const h = React.createElement;
+  const RF = window.ReactFlow;
+  const Flow = RF.default || RF.ReactFlow;
+  const { ReactFlowProvider, Handle, Position, Background, Controls, MiniMap, addEdge, MarkerType,
+          useNodesState, useEdgesState, useReactFlow, BaseEdge, EdgeLabelRenderer, getSmoothStepPath, reconnectEdge } = RF;
+  const DRAG_TYPE = 'application/x-ras-equipment';
+  const COLOR = { tank: '--s1', tank_bottom: '--s1', tank_center: '--s1', tank_3: '--s1', raceway: '--s1', junction: '--ink-2', rfs: '--s2', drum_filter: '--s2', biofilter: '--s3', degasser: '--s7', cone: '--s5',
+                  ozone: '--s7', uv: '--s7', pump: '--ink-2', sump: '--ink-2', splitter: '--muted',
+                  makeup: '--s6', discharge: '--muted', other: '--muted', fbbr: '--s3', ozone_generator: '--s7', incubator: '--s4', sand_filter: '--s2',
+                  chiller: '--s1', hx_plate: '--s1', hx_tube: '--s1', reservoir: '--s1',
+                  jet_rect: '--s5', jet_round: '--s5' };
+  // what a pipe carries: colour and dash differ, so the type never depends on colour alone
+  const SERVICE = {
+    process:  { label: 'Process water',         color: 'var(--ink-2)', dash: null },
+    makeup:   { label: 'Make-up / fresh water', color: 'var(--s1)',    dash: null },
+    waste:    { label: 'Waste water / sludge',  color: '#8a5a2b',      dash: '10 4' },
+    cleaning: { label: 'Cleaning water',        color: 'var(--s3)',    dash: '3 4' },
+    utility:  { label: 'Chilled / heating water', color: 'var(--s1)',  dash: '12 3 2 3' },
+    drain:    { label: 'Drain',                 color: 'var(--muted)', dash: '7 3 1 3' },
+    gas:      { label: 'Ozone gas',             color: 'var(--s7)',    dash: '1 5' },
+  };
+  // a pipe's type unless the user set one: guessed from where it starts and ends
+  const guessService = (e, kindOf) => {
+    if (kindOf(e.source) === 'ozone_generator') return 'gas';
+    if (kindOf(e.source) === 'makeup') return 'makeup';
+    if (e.sourceHandle === 'out2' && (kindOf(e.source) || '').startsWith('hx_')) return 'utility';
+    if (e.targetHandle === 'in2' && (kindOf(e.target) || '').startsWith('hx_')) return 'utility';
+    if (e.sourceHandle === 'drain') return 'drain';
+    if (e.sourceHandle === 'sludge' || kindOf(e.target) === 'discharge') return 'waste';
+    return 'process';
+  };
+  const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  const csrf = () => (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+  // ---------- convert between the saved diagram and React Flow state ----------
+  const toRF = d => {
+    const kind = Object.fromEntries((d.nodes || []).map(n => [n.id, n.type]));
+    return {
+      // connection points were drawn 30 px wide, now 15: keep older ones centred where their pipes meet
+      nodes: (d.nodes || []).map(n => ({ id: n.id, type: 'equip',
+        position: n.type === 'junction' && !n.data?.small && n.position ? { x: n.position.x + 7.5, y: n.position.y + 7.5 } : (n.position || { x: 0, y: 0 }),
+        data: { kind: n.type, name: n.data?.name || E.types[n.type]?.label, spec: n.data?.spec || {}, outlets: n.data?.outlets || {},
+                qty: n.data?.qty ?? 1, standard: n.data?.standard ?? '', unit_price: n.data?.unit_price ?? '', inlets: n.data?.inlets ?? 1,
+                ...(n.type === 'junction' ? { roles: { ...JDEF, ...(n.data?.roles || {}) }, small: true } : {}),
+                ...(n.data?.portPos ? { portPos: n.data.portPos } : {}) } })),
+      edges: (d.edges || []).map(e => {
+        // older connection points had single 'in'/'out' handles
+        let sh = e.sourceHandle, th = e.targetHandle || 'in';
+        if (kind[e.source] === 'junction' && (!sh || sh === 'out')) sh = 'right';
+        if (kind[e.target] === 'junction' && th === 'in') th = 'left';
+        if (kind[e.source] === 'ozone_generator') { sh = 'gas'; th = 'gas'; }
+        return { ...e, sourceHandle: sh, targetHandle: th, type: 'pipe', updatable: true, markerEnd: { type: MarkerType.ArrowClosed } };
+      }),
+    };
+  };
+  const fromRF = (nodes, edges, limits) => ({
+    nodes: nodes.map(n => ({ id: n.id, type: n.data.kind, position: n.position,
+      data: { name: n.data.name, spec: n.data.spec, outlets: n.data.outlets, qty: n.data.qty, standard: n.data.standard,
+              unit_price: n.data.unit_price, inlets: n.data.inlets, ...(n.data.roles ? { roles: n.data.roles, small: true } : {}),
+              ...(n.data.portPos ? { portPos: n.data.portPos } : {}) } })),
+    edges: edges.map(e => ({ id: e.id, source: e.source, sourceHandle: e.sourceHandle, target: e.target, targetHandle: e.targetHandle || 'in',
+                             ...(e.service ? { service: e.service } : {}),
+                             ...(e.cx != null ? { cx: Math.round(e.cx), cy: Math.round(e.cy) } : {}) })),
+    limits,
+  });
+
+  // ---------- equipment node ----------
+  function summary(kind, r) {
+    if (!r) return null;
+    if (kind === 'pump' && r.pump) {
+      if (!r.pump.running) return ['standby', 'not running'];
+      const l = [`${fmt(r.pump.flow_m3h)} m³/h${r.pump.vfd ? ` · ${fmt(r.pump.frequency_hz)} Hz` : ''}`];
+      if (r.pump.power_kw) l.push(`${fmt(r.pump.power_kw, 2)} kW`);
+      if (r.pump_balance != null && Math.abs(r.pump_balance) > 0.01)
+        l.push(r.pump_balance < 0 ? `short ${fmt(-r.pump_balance)} m³/h` : `overflow ${fmt(r.pump_balance)} m³/h`);
+      return l;
+    }
+    const c = r.c_in || {};
+    const lines = [`in ${fmt(r.q_in)} m³/h`];
+    if (E.types[kind]?.tank) {
+      if (r.biomass_kg) lines.push(`${fmt(r.biomass_kg, 0)} kg fish (${fmt(r.biomass_pct, 0)} %) · ${fmt(r.density_kgm3, 1)} kg/m³`);
+      if (r.feed_kgd) lines[0] += ` · feed ${fmt(r.feed_kgd, 1)} kg/d${r.feed_now_kgh != null ? ` (${fmt(r.feed_now_kgh, 2)} kg this hour)` : ''}`;
+      if (r.tss_gh != null) lines.push(`g/h: TSS +${fmt(r.tss_gh, 0)} · TAN +${fmt(r.tan_gh, 1)} · CO₂ +${fmt(r.co2_gh, 0)} · O₂ −${fmt(r.o2_gh, 0)}`);
+      if (r.tgp_pct != null) lines.push(`TGP ${fmt(r.tgp_pct, 1)} %${r.tgp_pct > 103 ? ' ⚠' : ''}`);
+    }
+    if (r.jet_ae_pct != null) lines.push(`O₂ → ${fmt(r.o2_target_mgl, 1)} mg/L${r.o2_auto ? ' (auto)' : ''} · ${fmt(r.jet_ae_pct, 1)} % absorbed`);
+    if (kind === 'cone' && r.o2_target_mgl != null) lines.push(`O₂ → ${fmt(r.o2_target_mgl, 1)} mg/L${r.o2_auto ? ' (auto)' : ''}`);
+    if (r.pure_o2_kgd != null) lines.push(`pure O₂ ${fmt(r.pure_o2_kgd)} kg/d`);
+    if (r.volume_m3 != null) lines.push(`${fmt(r.volume_m3, 2)} m³ · ${fmt(r.residence_min, 1)} min`);
+    if (r.tss_removed_kgd != null) lines.push(`TSS out ${fmt(r.tss_removed_kgd)} kg/d`);
+    if (r.tan_in_mgl != null) lines.push(`TAN ${fmt(r.tan_in_mgl, 2)} → ${fmt(r.tan_out_mgl, 2)} mg/L · ${fmt(r.tan_eff_pct, 0)} %`);
+    if (r.media_m3 != null) lines.push(`media ${fmt(r.media_m3, 1)} m³ · ${fmt(r.fill_pct, 0)} % fill → ${fmt(r.vessel_m3, 1)} m³`);
+    if (r.tan_removed_kgd != null) lines.push(`TAN nitrified ${fmt(r.tan_removed_kgd, 2)} kg/d`);
+    if (r.co2_removed_kgd != null) lines.push(`CO₂ stripped ${fmt(r.co2_removed_kgd)} kg/d`);
+    if (r.gas_m3h != null) lines.push(`stripping gas ${fmt(r.gas_m3h, 1)} m³/h`);
+    if (r.tss_captured_kgd != null) lines.push(`TSS trapped ${fmt(r.tss_captured_kgd)} kg/d`);
+    if (r.ozone_g_h != null) lines.push(`O₃ ${fmt(r.ozone_g_h)} g/h · ${fmt(r.ozone_mg_per_l, 2)} mg/L`);
+    if (kind === 'reservoir') return [`in ${fmt(r.q_in)} m³/h`, r.retention_h != null ? `retention ${fmt(r.retention_h, 1)} h` : 'no inflow'];
+    if (kind === 'chiller') return [`out ${fmt(r.t_out, 1)} °C`, `${fmt(r.cooling_kw, 1)} kW cooling · ${fmt(r.chiller_power_kw, 1)} kWe`];
+    if (r.duty_kw != null) return [`${fmt(r.q_process)} m³/h · ${r.mode} ${fmt(r.duty_kw, 1)} kW`, `process ${fmt(r.t_process_in, 1)} → ${fmt(r.t_process_out, 1)} °C`];
+    if (kind === 'ozone_generator') return [`O₃ ${fmt(r.output_g_h)} g/h`, `${fmt(r.output_kgd, 2)} kg/day`];
+    if (kind === 'pump' && r.pump_balance != null && Math.abs(r.pump_balance) > 1e-6)
+      lines.push(r.pump_balance < 0 ? `short ${fmt(-r.pump_balance)} m³/h` : `overflow ${fmt(r.pump_balance)} m³/h`);
+    return lines;
+  }
+  // ---------- P&ID-style symbols (96 × 64) and where their ports sit on them ----------
+  // diagonal hatching clipped to a rectangle (fixed media bed)
+  const hatch = (x0, y0, x1, y1, step) => {
+    let d = '';
+    for (let c = y0 + step; c < y1 + (x1 - x0); c += step) {
+      const xa = x0 + Math.max(0, c - y1), xb = Math.min(x1, x0 + c - y0);
+      if (xb > xa) d += `M${xa} ${c - (xa - x0)} L${xb} ${c - (xb - x0)} `;
+    }
+    return d;
+  };
+  const SYM = {
+    tank: `<path class="wt" d="M10 22 Q22 19 34 22 T58 22 T86 22 V46 Q86 54 78 54 H18 Q10 54 10 46 Z"/>
+           <path class="ln" d="M10 10 V46 Q10 54 18 54 H78 Q86 54 86 46 V10"/>
+           <path class="ln" d="M2 18 H22"/><path class="ln" d="M86 30 H94"/><path class="ln" d="M48 54 V62"/>
+           <path class="fs" d="M38 38 q9 -7 18 0 q-9 7 -18 0 z M56 38 l7 -5 v10 z"/>`,
+    tank_bottom: `<path class="wt" d="M10 22 Q22 19 34 22 T58 22 T86 22 V46 Q86 54 78 54 H18 Q10 54 10 46 Z"/>
+           <path class="ln" d="M10 10 V46 Q10 54 18 54 H78 Q86 54 86 46 V10"/>
+           <path class="ln" d="M2 18 H22"/><path class="ln" d="M48 54 V62"/>
+           <path class="thin" d="M40 50 L48 54 L56 50"/>
+           <path class="fs" d="M38 36 q9 -7 18 0 q-9 7 -18 0 z M56 36 l7 -5 v10 z"/>`,
+    tank_center: `<path class="wt" d="M10 22 Q22 19 34 22 T58 22 T86 22 V46 Q86 54 78 54 H18 Q10 54 10 46 Z"/>
+           <path class="ln" d="M10 10 V46 Q10 54 18 54 H78 Q86 54 86 46 V10"/>
+           <path class="ln" d="M2 18 H22"/><path class="ln" d="M30 54 V62"/>
+           <path class="ln thick" d="M56 27 V50 H94"/><path class="ln" d="M52 27 H60"/>
+           <path class="fs" d="M18 36 q8 -6 16 0 q-8 6 -16 0 z M34 36 l6 -4 v8 z"/>`,
+    tank_3: `<path class="wt" d="M10 22 Q22 19 34 22 T58 22 T86 22 V46 Q86 54 78 54 H18 Q10 54 10 46 Z"/>
+           <path class="ln" d="M10 10 V46 Q10 54 18 54 H78 Q86 54 86 46 V10"/>
+           <path class="ln" d="M2 18 H22"/><path class="ln" d="M86 26 H94"/><path class="ln" d="M30 54 V62"/>
+           <path class="ln thick" d="M56 27 V50 H94"/><path class="ln" d="M52 27 H60"/>
+           <path class="fs" d="M18 36 q8 -6 16 0 q-8 6 -16 0 z M34 36 l6 -4 v8 z"/>`,
+    // raceway (wide symbol): long open channel, water enters the left end at the surface, leaves the
+    // right end low through the screen; chevrons mark the plug flow, fish sit in the upper water
+    raceway: `<path class="wt" d="M10 22 Q20 19 30 22 T50 22 T70 22 T90 22 T110 22 T130 22 T140 22 V54 H10 Z"/>
+           <path class="ln" d="M10 8 V54 H140 V8"/>
+           <path class="ln" d="M2 16 H22"/><path class="ln" d="M140 40 H148"/>
+           <path class="thin" d="M34 42 l7 4 l-7 4 M58 42 l7 4 l-7 4 M82 42 l7 4 l-7 4 M106 42 l7 4 l-7 4"/>
+           <path class="fs" d="M26 31 q7 -5 14 0 q-7 5 -14 0 z M40 31 l6 -4 v8 z M86 31 q7 -5 14 0 q-7 5 -14 0 z M100 31 l6 -4 v8 z"/>`,
+    junction: `<path class="ln thick" d="M2 32 H94"/><path class="ln" d="M24 14 Q40 14 48 32 M24 50 Q40 50 48 32"/>
+           <circle class="fillc" cx="48" cy="32" r="6"/>`,
+    rfs: `<path class="wt" d="M18 14 H78 V34 L48 56 L18 34 Z"/>
+          <path class="ln" d="M18 6 V34 L48 56 L78 34 V6"/><rect class="ln" x="41" y="4" width="14" height="26"/>
+          <path class="ln" d="M2 12 H41"/><path class="ln" d="M78 12 H94"/><path class="ln" d="M48 56 V62"/>
+          <path class="thin" d="M30 44 l4 3 M62 44 l-4 3 M48 50 v-3"/>`,
+    drum_filter: `<rect class="ln wt" x="12" y="14" width="72" height="32" rx="16"/>
+          <path class="thin" d="M26 15 V45 M34 15 V45 M42 15 V45 M50 15 V45 M58 15 V45 M66 15 V45 M74 15 V45"/>
+          <path class="ln" d="M18 8 H78"/><path class="thin" d="M26 8 v3 M38 8 v3 M50 8 v3 M62 8 v3 M74 8 v3"/>
+          <path class="ln" d="M2 30 H12"/><path class="ln" d="M84 30 H94"/><path class="ln" d="M48 46 V62"/>`,
+    biofilter: `<rect class="wt" x="16" y="16" width="64" height="88"/><rect class="ln" x="16" y="6" width="64" height="98" rx="3"/>
+          <circle class="ring" cx="28" cy="28" r="3.4"/><circle class="ring" cx="46" cy="24" r="3.4"/><circle class="ring" cx="64" cy="30" r="3.4"/>
+          <circle class="ring" cx="34" cy="44" r="3.4"/><circle class="ring" cx="56" cy="48" r="3.4"/><circle class="ring" cx="70" cy="58" r="3.4"/>
+          <circle class="ring" cx="26" cy="62" r="3.4"/><circle class="ring" cx="44" cy="70" r="3.4"/><circle class="ring" cx="62" cy="76" r="3.4"/>
+          <circle class="ring" cx="30" cy="84" r="3.4"/><circle class="ring" cx="52" cy="90" r="3.4"/>
+          <path class="thin" d="M22 98 H74"/><path class="thin" d="M28 96 v-3 M40 96 v-3 M52 96 v-3 M64 96 v-3"/>`,
+    degasser: `<rect class="ln wt" x="36" y="12" width="24" height="46"/>
+          <path class="thin" d="M36 22 L60 28 L36 34 L60 40 L36 46"/>
+          <circle class="ln" cx="48" cy="6" r="5"/><path class="thin" d="M48 1 V11 M43 6 H53"/>
+          <path class="ln" d="M2 16 H36"/><path class="ln" d="M60 52 H94"/>`,
+    incubator: `<rect class="ln wt" x="28" y="6" width="40" height="52" rx="2"/>
+          <path class="thin" d="M28 15 H68 M28 24 H68 M28 33 H68 M28 42 H68 M28 51 H68"/>
+          <circle class="fillc" cx="36" cy="12" r="1.6"/><circle class="fillc" cx="42" cy="12" r="1.6"/><circle class="fillc" cx="48" cy="12" r="1.6"/>
+          <circle class="fillc" cx="39" cy="21" r="1.6"/><circle class="fillc" cx="45" cy="21" r="1.6"/><circle class="fillc" cx="51" cy="21" r="1.6"/>
+          <circle class="fillc" cx="36" cy="30" r="1.6"/><circle class="fillc" cx="54" cy="30" r="1.6"/><circle class="fillc" cx="60" cy="39" r="1.6"/>
+          <path class="thin" d="M64 18 v3 M58 27 v3 M62 36 v3 M56 45 v3"/>
+          <path class="ln" d="M48 0 V6"/>`,
+    // jet platform oxygenator: water box above the nozzle plate, jets into the O₂ cushion, skirt below
+    jet_rect: `<rect class="wt" x="30" y="8" width="36" height="16"/><path class="ln" d="M30 4 V58 M66 4 V58"/>
+          <path class="ln thick" d="M30 24 H66"/><path class="thin" d="M30 40 H66"/>
+          <path class="thin" stroke-dasharray="2 2" d="M35 24 V39 M41 24 V39 M47 24 V39 M53 24 V39 M59 24 V39 M64 24 V39"/>
+          <path class="ln" d="M2 12 H30"/><path class="ln" d="M66 50 H94"/><text x="70" y="34" class="tx">O₂</text>`,
+    jet_round: `<path class="wt" d="M30 10 V24 H66 V10 Z"/><ellipse class="ln" cx="48" cy="8" rx="18" ry="4"/>
+          <path class="ln" d="M30 8 V56 Q48 62 66 56 V8"/><path class="ln thick" d="M30 24 Q48 28 66 24"/>
+          <path class="thin" d="M30 40 Q48 44 66 40"/>
+          <path class="thin" stroke-dasharray="2 2" d="M37 26 V40 M43 26 V41 M48 27 V41 M53 26 V41 M59 26 V40"/>
+          <path class="ln" d="M2 12 H30"/><path class="ln" d="M66 50 H94"/><text x="70" y="34" class="tx">O₂</text>`,
+    cone: `<path class="ln wt" d="M40 6 H56 L72 52 Q72 56 68 56 H28 Q24 56 24 52 Z"/>
+          <circle class="ring" cx="44" cy="34" r="2.2"/><circle class="ring" cx="52" cy="42" r="2.6"/><circle class="ring" cx="48" cy="24" r="1.8"/>
+          <path class="ln" d="M2 12 H40"/><path class="ln" d="M70 46 H94"/><path class="ln" d="M48 0 V6"/>
+          <text x="58" y="20" class="tx">O₂</text>`,
+    ozone: `<rect class="ln wt" x="34" y="6" width="28" height="50" rx="4"/>
+          <circle class="ring" cx="44" cy="44" r="2"/><circle class="ring" cx="52" cy="36" r="2.4"/><circle class="ring" cx="46" cy="26" r="1.8"/>
+          <circle class="ring" cx="54" cy="18" r="1.6"/><path class="thin" d="M38 50 H58"/>
+          <path class="ln" d="M2 40 H34"/><path class="ln" d="M62 14 H94"/><text x="66" y="40" class="tx">O₃</text>`,
+    ozone_generator: `<rect class="ln" x="18" y="8" width="56" height="48" rx="4"/><path class="thin" d="M18 18 H74"/>
+          <path class="fillc" d="M48 22 L38 37 H46 L41 51 L55 33 H47 L52 22 Z"/>
+          <circle class="ln" cx="66" cy="13" r="2"/><text x="22" y="15" class="tx" style="font-size:7px">O₃ GEN</text>
+          <path class="gasln" d="M74 32 H94"/>`,
+    fbbr: `<rect class="wt" x="14" y="12" width="68" height="92"/><rect class="ln" x="14" y="6" width="68" height="98" rx="3"/>
+          <rect class="ln" x="20" y="20" width="56" height="70" fill="none"/>
+          <path class="thin" d="${hatch(20, 20, 76, 90, 9)}"/><path class="thin" d="M22 98 H74"/>`,
+    uv: `<rect class="ln wt" x="12" y="20" width="72" height="24" rx="12"/><path class="lamp" d="M22 32 H74"/>
+          <path class="thin" d="M30 14 v4 M42 12 v6 M54 12 v6 M66 14 v4 M30 46 v4 M42 46 v6 M54 46 v6 M66 46 v4"/>
+          <path class="ln" d="M2 32 H12"/><path class="ln" d="M84 32 H94"/>`,
+    pump: `<circle class="ln wt" cx="48" cy="30" r="18"/><path class="ln fillc" d="M40 17 L65 30 L40 43 Z"/>
+          <path class="ln" d="M32 54 H64 M40 48 L36 54 M56 48 L60 54"/>
+          <path class="ln" d="M2 30 H30"/><path class="ln" d="M66 30 H94"/>`,
+    sump: `<path class="wt" d="M12 22 Q30 18 48 22 T84 22 V54 H12 Z"/><path class="ln" d="M12 8 V54 H84 V8"/>
+          <path class="ln" d="M2 16 H12 M2 30 H12 M2 44 H12"/><path class="ln" d="M84 20 H94 M84 34 H94 M84 48 H94"/>`,
+    sand_filter: `<path class="ln wt" d="M32 14 Q32 4 48 4 Q64 4 64 14 V50 Q64 60 48 60 Q32 60 32 50 Z"/>
+          <path class="thin" d="M32 30 H64 M32 44 H64"/>
+          <circle class="fillc" cx="38" cy="34" r="0.9"/><circle class="fillc" cx="44" cy="38" r="0.9"/><circle class="fillc" cx="50" cy="33" r="0.9"/>
+          <circle class="fillc" cx="56" cy="39" r="0.9"/><circle class="fillc" cx="60" cy="34" r="0.9"/><circle class="fillc" cx="41" cy="41" r="0.9"/>
+          <circle class="ring" cx="38" cy="48" r="1.6"/><circle class="ring" cx="46" cy="48" r="1.6"/><circle class="ring" cx="54" cy="48" r="1.6"/>
+          <path class="ln" d="M2 12 H34"/><path class="ln" d="M62 12 H94"/><path class="ln" d="M64 52 H94"/>
+          <text x="68" y="9" class="tx" style="font-size:7px">BW</text>`,
+    // concrete raw-water tank: thick walls, open top, wavy water
+    reservoir: `<path class="wt" d="M10 16 Q20 13 30 16 T50 16 T70 16 T86 16 V54 H10 Z"/>
+          <path class="ln thick" d="M8 4 V56 H88 V4"/>
+          <path class="thin" d="M16 24 q5 -3 10 0 M44 30 q5 -3 10 0 M66 22 q5 -3 10 0"/>
+          <path class="ln" d="M2 12 H24 V18 M2 26 H8"/><path class="ln" d="M88 30 H94 M88 46 H94"/>
+          <text x="36" y="48" class="tx" style="font-size:7px">RAW</text>`,
+    chiller: `<rect class="ln wt" x="14" y="8" width="68" height="48" rx="3"/>
+          <circle class="ln" cx="34" cy="24" r="10"/><circle class="ln" cx="62" cy="24" r="10"/>
+          <path class="thin" d="M34 24 l0 -8 M34 24 l7 4 M34 24 l-7 4 M62 24 l0 -8 M62 24 l7 4 M62 24 l-7 4"/>
+          <path class="thin" d="M20 46 l5 -6 l5 6 l5 -6 l5 6 l5 -6 l5 6 l5 -6 l5 6 l5 -6 l5 6 l5 -6"/>
+          <path class="ln" d="M2 32 H14"/><path class="ln" d="M82 32 H94"/>`,
+    // plate pack between two frame plates; process side on the top ports, utility side on the bottom ones
+    hx_plate: `<rect class="ln fillc" x="24" y="4" width="5" height="56"/><rect class="ln fillc" x="67" y="4" width="5" height="56"/>
+          <rect class="wt" x="29" y="8" width="38" height="48"/>
+          <path class="thin" d="M33 8 V56 M37 8 V56 M41 8 V56 M45 8 V56 M49 8 V56 M53 8 V56 M57 8 V56 M61 8 V56 M65 8 V56"/>
+          <path class="ln" d="M24 8 H72 M24 56 H72"/>
+          <path class="ln" d="M2 16 H24 M2 48 H24 M72 16 H94 M72 48 H94"/>
+          <text x="6" y="13" class="tx">P</text><text x="6" y="45" class="tx">U</text>`,
+    // shell with a tube bundle; process water through the shell nozzles on top, utility through the bottom ones
+    hx_tube: `<rect class="ln wt" x="14" y="20" width="68" height="24" rx="12"/>
+          <path class="ln" d="M24 20 V44 M72 20 V44"/>
+          <path class="thin" d="M24 26 H72 M24 32 H72 M24 38 H72"/>
+          <path class="thin" d="M38 20 V30 M48 34 V44 M58 20 V30"/>
+          <path class="ln" d="M2 16 H30 V20 M66 20 V16 H94 M2 48 H30 V44 M66 44 V48 H94"/>
+          <text x="6" y="13" class="tx">P</text><text x="6" y="45" class="tx">U</text>`,
+    splitter: `<path class="ln thick" d="M2 32 H40"/><path class="ln" d="M40 32 C60 32 60 14 94 14 M40 32 H94 M40 32 C60 32 60 50 94 50"/>
+          <circle class="fillc" cx="40" cy="32" r="4.5"/>`,
+    makeup: `<path class="fillc" d="M16 18 q7 10 0 17 q-7 -7 0 -17 z"/>
+          <path class="ln wt" d="M32 22 V42 L50 32 Z M68 22 V42 L50 32 Z"/><path class="ln" d="M50 32 V16 M43 16 H57"/>
+          <path class="ln" d="M68 32 H94"/>`,
+    discharge: `<path class="ln" d="M2 20 H48 V44"/><path class="ln" d="M41 37 L48 45 L55 37"/>
+          <path class="thin" d="M28 52 H68 M32 52 l-4 6 M40 52 l-4 6 M48 52 l-4 6 M56 52 l-4 6 M64 52 l-4 6"/>`,
+    other: `<rect class="ln wt" x="18" y="12" width="60" height="40" rx="6"/><circle class="fillc" cx="38" cy="32" r="3"/>
+          <circle class="fillc" cx="48" cy="32" r="3"/><circle class="fillc" cx="58" cy="32" r="3"/>
+          <path class="ln" d="M2 32 H18"/><path class="ln" d="M78 32 H94"/>`,
+  };
+  // inlet y, and outlets: [side, x or y (, y where a bottom stub starts)] in symbol coordinates
+  const PORTS = {
+    fbbr: { in: 16, out: { out: ['right', 94], drain: ['bottom', 48, 104] } },
+    ozone_generator: { in: 32, out: {}, gas: 32 },
+    tank: { in: 18, out: { side: ['right', 30], bottom: ['bottom', 48] } },
+    tank_bottom: { in: 18, out: { bottom: ['bottom', 48] } },
+    tank_center: { in: 18, out: { bottom: ['bottom', 30], center: ['right', 50] } },
+    tank_3: { in: 18, out: { bottom: ['bottom', 30], center: ['right', 50], side: ['right', 26] } },
+    raceway: { in: 16, out: { out: ['right', 40] } },
+    junction: { in: 32, out: { out: ['right', 32] } },
+    rfs: { in: 12, out: { out: ['right', 12], sludge: ['bottom', 48] } },
+    drum_filter: { in: 30, out: { out: ['right', 30], sludge: ['bottom', 48] } },
+    biofilter: { in: 16, out: { out: ['right', 16], drain: ['bottom', 48, 104] } },
+    // four inlets stacked on the left: in, in2, in3, in4 (x where the pipe stub meets the column)
+    degasser: { in: 16, ins: [16, 28, 40, 52], inStubTo: 36, out: { out: ['right', 52], drain: ['bottom', 48, 58] } },
+    // water enters at the top, leaves at the bottom
+    incubator: { inTop: 48, out: { out: ['bottom', 48, 58] } },
+    cone: { in: 12, out: { out: ['right', 46], drain: ['bottom', 48, 56] } },
+    jet_rect: { in: 12, out: { out: ['right', 50], drain: ['bottom', 48, 58] } },
+    jet_round: { in: 12, out: { out: ['right', 50], drain: ['bottom', 48, 60] } },
+    ozone: { in: 40, out: { out: ['right', 14], drain: ['bottom', 48, 56] }, gasIn: 48 },
+    uv: { in: 32, out: { out: ['right', 32], drain: ['bottom', 48, 44] } },
+    pump: { in: 30, out: { out: ['right', 30] } },
+    // three inlets left, three outlets right, drain at the bottom (stubs are drawn in the symbol)
+    sump: { in: 16, ins: [16, 30, 44], inStubsInSymbol: true,
+            out: { out: ['right', 20], out2: ['right', 34], out3: ['right', 48], drain: ['bottom', 48, 54] } },
+    sand_filter: { in: 12, out: { backwash: ['right', 12], out: ['right', 52] } },
+    reservoir: { in: 12, ins: [12, 26], inStubsInSymbol: true,
+                 out: { out: ['right', 30], out2: ['right', 46], drain: ['bottom', 48, 56] } },
+    chiller: { in: 32, out: { out: ['right', 32] } },
+    // two circuits that do not mix: process in/out on top, utility in2/out2 below
+    hx_plate: { in: 16, ins: [16, 48], inStubsInSymbol: true, inTitles: ['Process in', 'Utility in'],
+                out: { out: ['right', 16], out2: ['right', 48] } },
+    hx_tube: { in: 16, ins: [16, 48], inStubsInSymbol: true, inTitles: ['Process in', 'Utility in'],
+               out: { out: ['right', 16], out2: ['right', 48] } },
+    splitter: { in: 32, out: { a: ['right', 14], b: ['right', 32], c: ['right', 50] } },
+    makeup: { in: 32, out: { out: ['right', 32] } }, discharge: { in: 20, out: {} },
+    other: { in: 32, out: { out: ['right', 32], drain: ['bottom', 48, 52] } },
+  };
+  // symbols taller / wider than the standard 96 × 64
+  const TALL = { biofilter: 112, fbbr: 112 };
+  const WIDE = { raceway: 150 };
+  // equipment whose inlet and outlet can be moved (set in the specification)
+  const PORT_SPOTS = [['left-top', 'Left, top'], ['left-middle', 'Left, middle'], ['left-bottom', 'Left, bottom'],
+                      ['top-left', 'Top, left'], ['top-right', 'Top, right'],
+                      ['right-top', 'Right, top'], ['right-middle', 'Right, middle'], ['right-bottom', 'Right, bottom']];
+  const MOVABLE = { biofilter: { in: 'left-top', out: 'right-top' }, fbbr: { in: 'left-top', out: 'right-bottom' } };
+  // node layout, top to bottom: name, two lines of results, symbol (so bottom outlets leave a clear edge)
+  const PAD = 6, HEAD = 18 + 26, SW = 96, SH = 64;
+  // drawn size relative to each other: tanks and biofilters are big, settlers, UV and pumps small
+  const SCALE = { tank: 1.7, tank_bottom: 1.7, tank_center: 1.7, tank_3: 1.7, raceway: 1.5, biofilter: 1.6, sump: 1.7,
+                  drum_filter: 1.6, sand_filter: 1.3, degasser: 1.5, incubator: 1.2, cone: 0.95, jet_rect: 1.05, jet_round: 1.05, other: 0.9, rfs: 0.8, pump: 0.8, ozone: 0.75,
+                  uv: 0.65, splitter: 0.6, makeup: 0.6, discharge: 0.6, fbbr: 1.5, ozone_generator: 0.85,
+                  chiller: 1.1, hx_plate: 0.9, hx_tube: 1.1, reservoir: 1.9 };
+  // ---------- connection point: four ports, each an inlet or an outlet (set in its specification) ----------
+  const JDEF = { top: 'in', right: 'out', bottom: 'out', left: 'in' };
+  const JPOS = { top: Position.Top, right: Position.Right, bottom: Position.Bottom, left: Position.Left };
+  const rolesOf = data => ({ ...JDEF, ...(data.roles || {}) });
+  const outletsOf = node => node.data.kind === 'junction'
+    ? Object.entries(rolesOf(node.data)).filter(([, r]) => r === 'out').map(([p]) => [p, p[0].toUpperCase() + p.slice(1)])
+    : E.types[node.data.kind].outlets;
+  function JunctionNode({ id, data, selected }) {
+    const roles = rolesOf(data);
+    const refresh = RF.useUpdateNodeInternals();
+    useEffect(() => { refresh(id); }, [JSON.stringify(roles)]);
+    const r = data.res;
+    return h('div', { className: `junc${selected ? ' sel' : ''}${r?.warnings?.length ? ' warn' : ''}`, title: 'Select to set which ports are inlets and outlets' },
+      h('div', { className: 'jname' }, data.name),
+      h('svg', { viewBox: '0 0 40 40', width: 11, height: 11, 'aria-hidden': true },
+        h('path', { d: 'M0 20 H40 M20 0 V40', className: 'jl' }), h('circle', { cx: 20, cy: 20, r: 7, className: 'jc' })),
+      r && h('div', { className: 'jq' }, `${fmt(r.q_in)} m³/h`),
+      ...Object.keys(JPOS).map(p => h('span', { key: p + 'r', className: `jrole ${p} ${roles[p]}` }, roles[p])),
+      ...Object.entries(JPOS).map(([p, P]) => h(Handle, {
+        key: p, id: p, position: P, type: roles[p] === 'in' ? 'target' : 'source',
+        title: `${p} port: ${roles[p] === 'in' ? 'inlet' : 'outlet'}` })));
+  }
+  function EquipNode(props) {
+    if (props.data.kind === 'junction') return h(JunctionNode, props);
+    const { data, selected } = props;
+    const t = E.types[data.kind];
+    const r = data.res;
+    const bad = r && r.warnings && r.warnings.some(w => w.includes('outside limits') || w.includes('runs out'));
+    const warn = r && r.warnings && r.warnings.length;
+    const ports = PORTS[data.kind] || PORTS.other;
+    const kids = [];
+    const twoIn = t.tank && Number(data.inlets) === 2;
+    const H = TALL[data.kind] || SH, W = WIDE[data.kind] || SW;
+    const s = SCALE[data.kind] || 1, sw = Math.round(W * s), sh = Math.round(H * s);
+    let inStubs = '', stubs = '';
+    const mv = MOVABLE[data.kind] && { ...MOVABLE[data.kind], ...(data.portPos || {}) };
+    const refresh = RF.useUpdateNodeInternals();
+    useEffect(() => { refresh(props.id); }, [mv ? `${mv.in}|${mv.out}` : '']);
+    // a movable port: handle on the chosen side plus its pipe stub up to the vessel wall
+    const place = (id, type, where, title) => {
+      const [side, at] = where.split('-');
+      if (side === 'top') {
+        const x = at === 'left' ? 30 : 66;
+        stubs += `<path class="ln" d="M${x} 0 V6"/>`;
+        kids.push(h(Handle, { key: id, type, id, position: Position.Top, title, style: { top: PAD + HEAD, left: PAD + x * s } }));
+      } else {
+        const y = { top: 16, middle: Math.round(H / 2), bottom: H - 20 }[at];
+        stubs += side === 'left' ? `<path class="ln" d="M2 ${y} H16"/>` : `<path class="ln" d="M80 ${y} H94"/>`;
+        kids.push(h(Handle, { key: id, type, id, position: side === 'left' ? Position.Left : Position.Right, title, style: { top: PAD + HEAD + y * s } }));
+      }
+    };
+    if (t.inputs && mv) place('in', 'target', mv.in, 'Inlet');
+    else if (t.inputs && ports.ins) {  // equipment with several inlets (e.g. the CO₂ degasser)
+      ports.ins.forEach((y, i) => {
+        const id = i === 0 ? 'in' : `in${i + 1}`;
+        kids.push(h(Handle, { key: id, type: 'target', position: Position.Left, id, style: { top: PAD + HEAD + y * s }, title: ports.inTitles?.[i] || `Inlet ${i + 1}` }));
+        if (i > 0 && !ports.inStubsInSymbol) inStubs += `<path class="ln" d="M2 ${y} H${ports.inStubTo}"/>`;
+      });
+    } else if (t.inputs && ports.inTop != null) {  // inlet on top (e.g. hatchery incubator)
+      kids.push(h(Handle, { key: 'in', type: 'target', position: Position.Top, id: 'in', style: { top: PAD + HEAD, left: PAD + ports.inTop * s } }));
+    } else if (t.inputs) kids.push(h(Handle, { key: 'in', type: 'target', position: Position.Left, id: 'in', style: { top: PAD + HEAD + ports.in * s } }));
+    if (twoIn) kids.push(h(Handle, { key: 'in2', type: 'target', position: Position.Left, id: 'in2', style: { top: PAD + HEAD + 38 * s } }));
+    // ozone gas: generator has a gas outlet, contactor a gas inlet on top
+    if (t.gas) kids.push(h(Handle, { key: 'gas', type: 'source', position: Position.Right, id: 'gas', className: 'gas', style: { top: PAD + HEAD + ports.gas * s } }));
+    if (ports.gasIn) kids.push(h(Handle, { key: 'gas', type: 'target', position: Position.Top, id: 'gas', className: 'gas',
+                                           style: { top: PAD + HEAD, left: PAD + ports.gasIn * s } }));
+    t.outlets.forEach(([p, label]) => {
+      if (mv && p === 'out') { place('out', 'source', mv.out, label); return; }
+      const [side, at, from] = ports.out[p] || ['right', 32];
+      if (from != null) stubs += `<path class="ln" d="M${at} ${from} V${H}"/>`;  // drain pipe stub under the vessel
+      if (side === 'bottom') {
+        const style = { top: PAD + HEAD + sh, left: PAD + at * s };
+        kids.push(h(Handle, { key: p, type: 'source', position: Position.Bottom, id: p, style }));
+        kids.push(h('span', { key: p + 'l', className: 'plabel b', style: { top: PAD + HEAD + sh + 4, left: PAD + at * s + 9 } }, label));
+      } else {
+        const top = PAD + HEAD + at * s;
+        kids.push(h(Handle, { key: p, type: 'source', position: Position.Right, id: p, style: { top } }));
+        if (t.outlets.length > 1) kids.push(h('span', { key: p + 'l', className: 'plabel', style: { top } }, label));
+      }
+    });
+    const lines = summary(data.kind, r);
+    // pumps: standby is drawn faded; a frequency drive shows its setting
+    const isOn = v => v !== false && String(v).toLowerCase() !== 'false';
+    const pumpOff = data.kind === 'pump' && !isOn(data.spec?.active ?? true);
+    const vfd = data.kind === 'pump' && !pumpOff && (data.spec?.vfd === true || data.spec?.vfd === 'true');
+    if (pumpOff) kids.push(h('span', { key: 'badge', className: 'pbadge off' }, 'STANDBY'));
+    else if (vfd) kids.push(h('span', { key: 'badge', className: 'pbadge vfd' }, `VFD ${fmt(Number(data.spec.frequency_hz ?? 50), 0)} Hz`));
+    return h('div', { className: `eq${selected ? ' sel' : ''}${bad ? ' bad' : warn ? ' warn' : ''}${pumpOff ? ' off' : ''}`,
+                      style: { '--c': `var(${COLOR[data.kind]})`, width: sw + 2 * PAD, '--sw': `${1 / s}` },
+                      title: `${t.label}${data.qty > 1 ? ` × ${data.qty}` : ''}` },
+      h('div', { className: 't' }, (bad || warn) ? h('i', { className: 'dot' }) : null, data.name, data.qty > 1 ? h('b', null, ` ×${data.qty}`) : null),
+      h('div', { className: 'm' }, (lines || []).slice(0, 2).map((l, i) => h('div', { key: i }, l))),
+      h('div', { className: 'sym', style: { width: sw, height: sh },
+                 dangerouslySetInnerHTML: { __html: `<svg viewBox="0 0 ${W} ${H}" width="${sw}" height="${sh}" aria-hidden="true">${SYM[data.kind] || SYM.other}${twoIn ? '<path class="ln" d="M2 38 H12"/>' : ''}${stubs}${inStubs}</svg>` } }),
+      ...kids);
+  }
+  const nodeTypes = { equip: EquipNode };
+
+  // ---------- pipe: flow label in the middle (drag it to move the bend), remove button, flow animation ----------
+  const DIR = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
+  // orthogonal route through the dragged point (cx, cy): leave the outlet, run to x = cx, run to y = cy
+  // (this horizontal run follows the pointer up and down), then go to the inlet
+  function routeThrough(sx, sy, sp, tx, ty, tp, cx, cy) {
+    const STUB = 20, R = 6;
+    const [sdx, sdy] = DIR[sp] || [1, 0], [tdx, tdy] = DIR[tp] || [-1, 0];
+    const s1 = [sx + sdx * STUB, sy + sdy * STUB], t1 = [tx + tdx * STUB, ty + tdy * STUB];
+    let pts = [[sx, sy], s1, [cx, s1[1]], [cx, cy], [t1[0], cy], t1, [tx, ty]];
+    pts = pts.filter((p, i) => i === 0 || Math.abs(p[0] - pts[i - 1][0]) > 0.5 || Math.abs(p[1] - pts[i - 1][1]) > 0.5);
+    // straight runs with small rounded corners
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 1; i < pts.length; i++) {
+      const [x, y] = pts[i];
+      if (i < pts.length - 1) {
+        const [px, py] = pts[i - 1], [nx, ny] = pts[i + 1];
+        const r = Math.min(R, Math.hypot(x - px, y - py) / 2, Math.hypot(nx - x, ny - y) / 2);
+        const ax = x - Math.sign(x - px) * r, ay = y - Math.sign(y - py) * r;
+        const bx = x + Math.sign(nx - x) * r, by = y + Math.sign(ny - y) * r;
+        d += ` L${ax},${ay} Q${x},${y} ${bx},${by}`;
+      } else d += ` L${x},${y}`;
+    }
+    return [d, cx, cy];
+  }
+  function PipeEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data, selected }) {
+    const rf = useReactFlow();
+    const [path, x, y] = data?.cx != null
+      ? routeThrough(sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, data.cx, data.cy)
+      : getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 6 });
+    // grab the pipe anywhere (its line or its label) and drag: the pipe's middle run follows the pointer.
+    // A press without movement is a click, which selects the pipe.
+    const onPointerDown = ev => {
+      if (ev.button !== 0 || ev.target.closest('button')) return;
+      ev.stopPropagation();
+      ev.preventDefault();
+      const el = ev.currentTarget;
+      el.setPointerCapture(ev.pointerId);
+      const pane = el.closest('.react-flow').getBoundingClientRect();
+      const x0 = ev.clientX, y0 = ev.clientY;
+      const toFlow = e => rf.project({ x: e.clientX - pane.left, y: e.clientY - pane.top });
+      // move the bend by how far the pointer moves, so the pipe does not jump to the pointer
+      const p0 = toFlow(ev), b0 = { x: data?.cx ?? x, y: data?.cy ?? y };
+      let moved = false;
+      const move = e => {
+        if (!moved && Math.hypot(e.clientX - x0, e.clientY - y0) < 4) return;
+        moved = true;
+        const p = toFlow(e);
+        data?.onBend?.(id, b0.x + p.x - p0.x, b0.y + p.y - p0.y);
+      };
+      const up = () => {
+        el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up);
+        if (!moved) data?.onSelect?.(id);
+      };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    };
+    return h(React.Fragment, null,
+      h(BaseEdge, { id, path, style, markerEnd, interactionWidth: 0 }),
+      // wide invisible grip along the whole pipe
+      h('path', { d: path, className: 'pipe-hit nodrag nopan', onPointerDown,
+                  onDoubleClick: ev => { ev.stopPropagation(); data?.onBend?.(id, null, null); } }),
+      data?.animate && !data?.gas && h('path', { d: path, className: 'flow-dots' }),
+      h(EdgeLabelRenderer, null,
+        h('div', { className: `pipe-label nodrag nopan${selected ? ' sel' : ''}${data?.bad ? ' bad' : ''}${data?.cx != null ? ' moved' : ''}`,
+                   style: { transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` },
+                   title: 'Drag the pipe (here or anywhere on its line) to move it · double-click to reset its route',
+                   onPointerDown, onDoubleClick: ev => { ev.stopPropagation(); data?.onBend?.(id, null, null); } },
+          h('span', { className: 'grip', 'aria-hidden': true }, '⋮⋮'),
+          data?.label ? h('span', { className: 'pl-body' }, h('span', null, data.label),
+            data.quality ? h('span', { className: 'pl-q' }, data.quality) : null) : null,
+          h('button', { type: 'button', title: 'Remove pipe', 'aria-label': 'Remove pipe',
+                        onClick: ev => { ev.stopPropagation(); data?.onDelete?.(id); } }, '×'))));
+  }
+  const edgeTypes = { pipe: PipeEdge };
+
+  // ---------- inspector ----------
+  function NumberField({ label, unit, value, placeholder, onChange }) {
+    return h('label', { className: 'fld' }, h('span', null, label, unit ? h('span', { className: 'hint' }, ` [${unit}]`) : null),
+      h('input', { type: 'number', step: 'any', value: value ?? '', placeholder: placeholder ?? '', onChange: e => onChange(e.target.value) }));
+  }
+  function NodeInspector({ node, results, edges, nodes, update, remove, toggle, when }) {
+    const t = E.types[node.data.kind];
+    const r = results?.nodes?.[node.id];
+    const stds = E.standards.filter(s => s.category === t.category);
+    // same defaults as the solver: a connection point's outlets start as 'rest' (equal split)
+    const outSpec = p => ({ ...(t.default_outlets[p] || (node.data.kind === 'junction' ? { mode: 'rest' } : { mode: 'pct', value: 0 })),
+                            ...(node.data.outlets[p] || {}) });
+    const setSpec = (k, v) => update({ spec: { ...node.data.spec, [k]: v === '' ? '' : Number(v) } });
+    const setOut = (p, patch) => update({ outlets: { ...node.data.outlets, [p]: { ...outSpec(p), ...patch } } });
+    const outlets = outletsOf(node);
+    const isJ = node.data.kind === 'junction';
+    const tanks = nodes.filter(n => E.types[n.data.kind]?.tank).length || 1;
+    return h('div', null,
+      h('div', { className: 'tag' }, t.label),
+      h('h2', null, node.data.name),
+      h('label', { className: 'fld' }, 'Name', h('input', { type: 'text', value: node.data.name, onChange: e => update({ name: e.target.value }) })),
+      t.tank && h('label', { className: 'fld' }, 'Inlets',
+        h('select', { value: String(node.data.inlets || 1), onChange: e => update({ inlets: Number(e.target.value) }) },
+          h('option', { value: '1' }, 'Single inlet'), h('option', { value: '2' }, 'Two inlets'))),
+      MOVABLE[node.data.kind] && [['in', 'Inlet position'], ['out', 'Outlet position']].map(([k, label]) =>
+        h('label', { key: k, className: 'fld' }, label,
+          h('select', { value: { ...MOVABLE[node.data.kind], ...(node.data.portPos || {}) }[k],
+                        onChange: e => update({ portPos: { ...MOVABLE[node.data.kind], ...(node.data.portPos || {}), [k]: e.target.value } }) },
+            PORT_SPOTS.map(([v, l]) => h('option', { key: v, value: v }, l))))),
+      t.category && h('div', null,
+        h('label', { className: 'fld' }, 'Quantity', h('input', { type: 'number', min: 1, value: node.data.qty, onChange: e => update({ qty: Number(e.target.value) || 1 }) })),
+        h('label', { className: 'fld' }, 'Standard', h('select', { value: node.data.standard || '', onChange: e => update({ standard: e.target.value }) },
+          h('option', { value: '' }, stds.length ? '— none —' : 'no standards yet'),
+          stds.map(s => h('option', { key: s.id, value: s.id }, `${s.name} · ${fmt(s.capacity, 1)} ${s.unit}${s.price != null ? ` · ${fmt(s.price, 0)}` : ''}`)))),
+        h(NumberField, { label: 'Unit price (override)', value: node.data.unit_price, placeholder: 'from standard', onChange: v => update({ unit_price: v }) })),
+      t.spec.length > 0 && h('div', { className: 'sec' }, h('h3', null, 'Specification'),
+        t.spec.filter(s => !(s.key === 'frequency_hz' && node.data.kind === 'pump' && !(node.data.spec.vfd === true)))
+          .map(s => typeof s.default === 'boolean'
+            ? h('label', { key: s.key, className: 'fld' }, s.label,
+                h('select', { value: String(node.data.spec[s.key] ?? s.default),
+                              onChange: e => update({ spec: { ...node.data.spec, [s.key]: e.target.value === 'true' } }) },
+                  h('option', { value: 'true' }, 'Yes'), h('option', { value: 'false' }, 'No')))
+            : h(NumberField, { key: s.key, label: s.label, unit: s.unit, value: node.data.spec[s.key], placeholder: s.default ?? 'auto', onChange: v => setSpec(s.key, v) })),
+        node.data.kind === 'pump' && node.data.spec.vfd === true && h('p', { className: 'hint', style: { margin: '4px 0 0' } },
+          'Flow = rated flow × f / f nominal; power = rated power × (f / f nominal)³.'),
+        t.tank && ['tan_kgd', 'co2_kgd', 'tss_kgd', 'o2_kgd'].some(k => Number(node.data.spec[k]) > 0) &&
+          h('button', { type: 'button', className: 'btn', style: { marginTop: 6 }, title: 'Clear the typed loads so this tank works them out from its feed, hour by hour',
+            onClick: () => update({ spec: { ...node.data.spec, tan_kgd: 0, co2_kgd: 0, tss_kgd: 0, o2_kgd: 0 } }) },
+            'Loads from the feed (clear typed loads)')),
+      !t.category && ['junction', 'splitter'].includes(node.data.kind) &&
+        h('p', { className: 'conn-note' }, 'Connection only — not equipment. It joins or splits pipes and is not counted in Equipment or CAPEX.'),
+      isJ && h('div', { className: 'sec' }, h('h3', null, 'Ports'),
+        h('p', { className: 'hint', style: { margin: '0 0 4px' } }, 'Set each port as an inlet or an outlet. Switching a port removes the pipes on it.'),
+        Object.entries(rolesOf(node.data)).map(([p, r]) => h('label', { key: p, className: 'fld' }, p[0].toUpperCase() + p.slice(1),
+          h('select', { value: r, onChange: e => { if (e.target.value !== r) toggle(p); } },
+            h('option', { value: 'in' }, 'Inlet'), h('option', { value: 'out' }, 'Outlet'))))),
+      outlets.length > 0 && h('div', { className: 'sec' }, h('h3', null, 'Outlets'),
+        (isJ || t.connected_only) && h('p', { className: 'hint', style: { margin: '0 0 4px' } }, 'Only outlets with a pipe take water. Leave several on "rest" to split equally.'),
+        outlets.map(([p, label]) => {
+          const s = outSpec(p);
+          const q = edges.filter(e => e.source === node.id && e.sourceHandle === p).reduce((a, e) => a + (results?.edges?.[e.id]?.q || 0), 0);
+          return h('div', { key: p, className: 'outlet' },
+            h('span', null, label, h('span', { className: 'hint' }, ` ${fmt(q)} m³/h`)),
+            h('select', { value: s.mode, onChange: e => setOut(p, { mode: e.target.value }) },
+              h('option', { value: 'rest' }, 'rest'), h('option', { value: 'pct' }, '% of in'), h('option', { value: 'm3h' }, 'm³/h')),
+            s.mode === 'rest' ? h('span', { className: 'hint' }, 'remainder')
+              : h('input', { type: 'number', step: 'any', min: 0, value: s.value ?? '', onChange: e => setOut(p, { value: e.target.value === '' ? '' : Number(e.target.value) }) }));
+        })),
+      r && r.hour && h('div', { className: 'sec' }, h('h3', null, `In the tank — ${when}`), h(TankHour, { r, when: null })),
+      r && h('div', { className: 'sec' }, h('h3', null, 'Water entering'),
+        h('dl', { className: 'res' },
+          h('dt', null, 'Flow'), h('dd', null, `${fmt(r.q_in)} m³/h`),
+          ...Object.entries(E.components).flatMap(([c, label]) => [h('dt', { key: c }, label), h('dd', { key: c + 'v' }, `${fmt(r.c_in?.[c], c === 'temp' ? 1 : 2)} ${E.units[c]}`)]),
+          ...[['pure_o2_kgd', 'Pure O₂ used', 'kg/day'], ['tss_removed_kgd', 'TSS removed', 'kg/day'], ['tan_removed_kgd', 'TAN nitrified', 'kg/day'],
+              ['co2_removed_kgd', 'CO₂ stripped', 'kg/day'], ['tss_captured_kgd', 'TSS trapped in bed', 'kg/day'], ['retention_h', 'Retention time', 'h'],
+              ['volume_m3', 'Volume (flow × residence time)', 'm³'], ['q_process', 'Process flow', 'm³/h'],
+              ['biomass_pct', 'Share of the unit\'s fish', '%'], ['biomass_kg', 'Fish', 'kg'], ['density_kgm3', 'Density', 'kg/m³'],
+              ['o2_target_mgl', 'O₂ at outlet (set point)', 'mg/L'], ['tanks_fed', 'Fish tanks it feeds', ''],
+              ['feed_kgd', 'Feed', 'kg/day'], ['feed_now_kgh', 'Feed this hour', 'kg'], ['tss_gh', 'TSS made', 'g/h'], ['tan_gh', 'TAN made', 'g/h'], ['co2_gh', 'CO₂ made', 'g/h'],
+              ['o2_gh', 'O₂ used by the fish', 'g/h'],
+              ['tan_in_mgl', 'TAN in', 'mg/L'], ['tan_out_mgl', 'TAN out', 'mg/L'], ['tan_eff_pct', 'TAN removal efficiency', '%'],
+              ['media_required_m3', 'Media required (step 04, whole unit)', 'm³'], ['media_share_pct', 'This biofilter\'s share', '%'],
+              ['media_m3', 'Media here', 'm³'], ['fill_pct', 'Fill ratio', '%'], ['vessel_m3', 'Vessel volume (media / fill)', 'm³'],
+              ['ozone_g_h', 'Ozone', 'g O₃/h'], ['ozone_mg_per_l', 'Ozone dose', 'mg/L'], ['output_kgd', 'Ozone output', 'kg/day'],
+              ['t_out', 'Temperature out', '°C'], ['cooling_kw', 'Cooling', 'kW'], ['chiller_power_kw', 'Chiller electric power', 'kW'],
+              ['cooling_short_kw', 'Capacity short', 'kW'],
+              ['duty_kw', 'Heat transferred', 'kW'], ['t_process_out', 'Process out', '°C'], ['q_utility', 'Utility flow', 'm³/h'],
+              ['t_utility_in', 'Utility in', '°C'], ['t_utility_out', 'Utility out', '°C'],
+              ['jet_ae_pct', 'O₂ absorbed (jet)', '%'], ['jet_vent_nlmin', 'Vent gas', 'Nl/min'], ['jet_tgp_pct', 'Total gas pressure', '%'],
+              ['jet_holes', 'Nozzles', 'holes'], ['jet_depth_m', 'Water depth needed', 'm']]
+            .filter(([k]) => r[k] != null).flatMap(([k, label, u]) => [h('dt', { key: k }, label), h('dd', { key: k + 'v' }, `${fmt(r[k], 2)} ${u}`)]),
+          ...(r.jet_size ? [h('dt', { key: 'js' }, 'Plate'), h('dd', { key: 'jsv' }, r.jet_size)] : []),
+          ...(E.types[node.data.kind]?.jet ? [h('dt', { key: 'jl' }, 'Design'), h('dd', { key: 'jlv' }, h('a', { target: '_blank', rel: 'noopener', href: jetLink(node, r) }, 'open in the jet calculator ↗'))] : []),
+          ...(r.pump ? [h('dt', { key: 'ps' }, 'Pump'), h('dd', { key: 'psv' }, r.pump.running ? 'running' : 'standby'),
+                        h('dt', { key: 'pq' }, 'Pumped flow'), h('dd', { key: 'pqv' }, `${fmt(r.pump.flow_m3h)} m³/h`),
+                        ...(r.pump.running && r.pump.vfd ? [h('dt', { key: 'pf' }, 'Frequency'), h('dd', { key: 'pfv' }, `${fmt(r.pump.frequency_hz)} Hz`)] : []),
+                        ...(r.pump.power_kw ? [h('dt', { key: 'pp' }, 'Power'), h('dd', { key: 'ppv' }, `${fmt(r.pump.power_kw, 2)} kW`)] : [])] : [])),
+        r.warnings?.length > 0 && h('ul', { className: 'warns' }, r.warnings.map((w, i) => h('li', { key: i }, w)))),
+      h('button', { type: 'button', className: 'btn danger', style: { marginTop: 14 }, onClick: remove }, 'Remove from diagram'));
+  }
+  function EdgeInspector({ edge, results, nodes, remove, setEdge, service }) {
+    const r = results?.edges?.[edge.id];
+    const name = id => nodes.find(n => n.id === id)?.data.name || id;
+    const gas = service === 'gas';
+    return h('div', null, h('div', { className: 'tag' }, gas ? 'Gas line' : 'Pipe'),
+      h('h2', null, `${name(edge.source)} → ${name(edge.target)}`),
+      !gas && h('label', { className: 'fld' }, 'Pipe type',
+        h('select', { value: edge.service || '', onChange: e => setEdge({ service: e.target.value || undefined }) },
+          h('option', { value: '' }, `Automatic (${SERVICE[service].label.toLowerCase()})`),
+          Object.entries(SERVICE).filter(([k]) => k !== 'gas').map(([k, v]) => h('option', { key: k, value: k }, v.label)))),
+      edge.cx != null && h('button', { type: 'button', className: 'btn', style: { margin: '6px 0' }, onClick: () => setEdge({ cx: null, cy: null }) }, 'Reset route'),
+      gas ? h('p', { className: 'hint' }, 'Carries ozone from the generator to the contactor. It adds no water to the balance.')
+      : r ? h('dl', { className: 'res' }, h('dt', null, 'Flow'), h('dd', null, `${fmt(r.q)} m³/h`),
+        ...Object.entries(E.components).flatMap(([c, label]) => {
+          const bad = r.exceed.some(x => x.startsWith(label));
+          return [h('dt', { key: c }, label), h('dd', { key: c + 'v', className: bad ? 'bad' : '' }, `${fmt(r.c[c], c === 'temp' ? 1 : 2)} ${E.units[c]}`)];
+        })) : h('p', { className: 'hint' }, 'Solving…'),
+      h('button', { type: 'button', className: 'btn danger', style: { marginTop: 14 }, onClick: remove }, 'Remove pipe'));
+  }
+  function Library({ library, onSaveAs, onLoad, onDelete, onDownload, onUpload }) {
+    const [name, setName] = useState('');
+    const file = useRef(null);
+    return h('div', { className: 'sec' }, h('h3', null, 'Saved diagrams'),
+      h('p', { className: 'hint', style: { margin: '0 0 6px' } }, 'Save this diagram under a name and load it into any RAS unit, in any scenario.'),
+      h('form', { className: 'libsave', onSubmit: e => { e.preventDefault(); if (name.trim()) { onSaveAs(name.trim()); setName(''); } } },
+        h('input', { type: 'text', value: name, placeholder: 'Name, e.g. 4 tanks + drum + MBBR', onChange: e => setName(e.target.value), 'aria-label': 'Diagram name' }),
+        h('button', { type: 'submit', className: 'btn' }, 'Save')),
+      library.length === 0 ? h('p', { className: 'hint' }, 'Nothing saved yet.')
+        : h('ul', { className: 'lib' }, library.map(t => h('li', { key: t.id },
+            h('div', null, h('strong', null, t.name), h('div', { className: 'hint' }, `${t.items} items · ${t.updated}${t.source ? ` · from ${t.source}` : ''}`)),
+            h('div', { className: 'acts' },
+              h('button', { type: 'button', className: 'btn', onClick: () => onLoad(t) }, 'Load'),
+              h('button', { type: 'button', className: 'btn danger', title: 'Delete from library', onClick: () => onDelete(t) }, '✕'))))),
+      h('div', { style: { display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' } },
+        h('button', { type: 'button', className: 'btn', onClick: onDownload }, 'Download .json'),
+        h('button', { type: 'button', className: 'btn', onClick: () => file.current.click() }, 'Open .json…'),
+        h('input', { type: 'file', accept: '.json,application/json', ref: file, hidden: true,
+                     onChange: e => { const f = e.target.files[0]; if (f) f.text().then(onUpload); e.target.value = ''; } })));
+  }
+  // the unit's requirements (step 04) against what the drawn system does
+  const LAMP = { ok: 'OK', warn: 'Check', alarm: 'Short', none: '–' };
+  function Performance({ rows, status }) {
+    const n = rows.filter(r => r.status === 'alarm').length, w = rows.filter(r => r.status === 'warn').length;
+    return h('div', { className: 'perf' },
+      h('div', { className: `perf-sum ${status}` }, h('i', { className: `lamp ${status}` }),
+        status === 'ok' ? 'Meets every requirement of step 04'
+          : `${n ? `${n} short` : ''}${n && w ? ' · ' : ''}${w ? `${w} to check` : ''} against step 04`),
+      h('table', { className: 'perf-t' },
+        h('thead', null, h('tr', null, h('th', null, 'Check'), h('th', null, 'Target'), h('th', null, 'Drawn'), h('th', null, ''))),
+        h('tbody', null, rows.map((r, i) => h('tr', { key: i, title: r.note },
+          h('td', null, r.check, h('span', { className: 'u' }, ` ${r.unit}`)),
+          h('td', null, fmt(r.target, r.unit === 'mg/L' ? 2 : 1)),
+          h('td', null, fmt(r.actual, r.unit === 'mg/L' ? 2 : 1)),
+          h('td', null, h('span', { className: `status ${r.status === 'alarm' ? 'bad' : r.status}` }, LAMP[r.status])))))));
+  }
+  // the jet oxygenator's design in the Library calculator, with this point's flow and water
+  const jetLink = (node, r) => {
+    const sp = node.data.spec || {}, c = r.c_in || {};
+    const q = new URLSearchParams({ flow_m3h: (r.q_in || 0).toFixed(1), head_m: sp.head_m ?? 1, compartments: sp.compartments ?? 4,
+      plate_below_m: sp.plate_below_m ?? 0.1, o2_purity_pct: sp.o2_purity_pct ?? 95, o2_in: (c.o2 ?? 8).toFixed(2),
+      temp_c: (c.temp ?? 14).toFixed(1), targets: sp.o2_target_mgl ?? (r.o2_target_mgl != null ? r.o2_target_mgl.toFixed(1) : 18), shape: node.data.kind === 'jet_round' ? 'round' : 'rect' });
+    if (sp.E != null && sp.E !== '') q.set('E', sp.E);
+    return `${E.urls.jet}?${q}`;
+  };
+  // one hour in a fish tank: feed given, what the fish make (g/h), the rise it gives the water flowing through
+  // (mg/L, = g/h ÷ m³/h) and how fast it would build up in the tank volume alone (mg/L per hour), next to the tank water
+  const HOURLY = [['tss', 'TSS'], ['tan', 'TAN'], ['co2', 'CO₂'], ['o2', 'O₂']];
+  function TankHour({ r, name, when }) {
+    if (!r || !r.hour) return null;
+    return h('div', { className: 'tankhour' },
+      name && h('div', { className: 'th-name' }, name),
+      h('div', { className: 'th-feed' }, `feed ${fmt(r.feed_kgh, 2)} kg/h`, when ? h('span', null, ` · ${when}`) : null,
+        r.biomass_kg ? h('span', null, ` · ${fmt(r.biomass_kg, 0)} kg fish · ${fmt(r.q_in, 1)} m³/h through`) : null),
+      h('table', { className: 'th' },
+        h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'made g/h'), h('th', null, 'in flow mg/L'),
+          h('th', null, 'in volume mg/L·h'), h('th', null, 'tank water mg/L'))),
+        h('tbody', null, ...HOURLY.map(([c, lab]) => {
+          const x = r.hour[c] || {}, sign = v => (v > 0 ? '+' : '') + fmt(v, c === 'tan' ? 3 : 2);
+          return h('tr', { key: c }, h('td', null, lab), h('td', null, sign(x.gh)), h('td', null, x.rise_mgl == null ? '—' : sign(x.rise_mgl)),
+            h('td', null, x.per_volume_mgl_h == null ? '—' : sign(x.per_volume_mgl_h)),
+            h('td', null, r.c_tank ? fmt(r.c_tank[c], c === 'tan' ? 3 : 2) : '—'));
+        }))));
+  }
+
+  function SystemPanel({ results, limits, setLimits, isDefault, dirty, lib, tanks, when }) {
+    const L = [['tss', 'max'], ['tan', 'max'], ['co2', 'max'], ['o2', 'min'], ['no3', 'max']];
+    return h('div', null, h('div', { className: 'tag' }, 'Whole loop'), h('h2', null, 'Performance'),
+      results && results.ok && results.compare && h(Performance, { rows: results.compare, status: results.compare_status }),
+      isDefault && !dirty && h('p', { className: 'hint' }, 'This is the automatic starting layout, filled with this unit\'s peak loads. It is saved as soon as you change something.'),
+      results && !results.ok && h('ul', { className: 'warns' }, h('li', { className: 'err' }, results.error)),
+      results && results.ok && h('dl', { className: 'res' },
+        h('dt', null, 'Solved'), h('dd', { className: results.converged ? '' : 'bad' }, results.converged ? `yes, ${results.iterations} passes` : 'did not settle'),
+        h('dt', null, 'Make-up water'), h('dd', null, `${fmt(results.makeup_m3h, 2)} m³/h`),
+        h('dt', null, 'Discharge'), h('dd', null, `${fmt(results.discharge_m3h, 2)} m³/h`),
+        ...(results.pump_power_kw ? [h('dt', { key: 'pp' }, 'Pump power'), h('dd', { key: 'ppv' }, `${fmt(results.pump_power_kw, 1)} kW`)] : []),
+        ...(results.cooling_kw ? [h('dt', { key: 'ck' }, 'Cooling'), h('dd', { key: 'ckv' }, `${fmt(results.cooling_kw, 1)} kW`),
+                                  h('dt', { key: 'ce' }, 'Chiller power'), h('dd', { key: 'cev' }, `${fmt(results.chiller_power_kw, 1)} kW`)] : [])),
+      results?.warnings?.length > 0 && h('ul', { className: 'warns' }, results.warnings.map((w, i) => h('li', { key: i, className: 'err' }, w))),
+      results && results.ok && tanks && tanks.length > 0 && h('details', { className: 'sec', open: true },
+        h('summary', null, h('h3', { style: { display: 'inline' } }, `Fish tanks — ${when}`)),
+        ...tanks.map(t => h(TankHour, { key: t.id, r: results.nodes[t.id], name: t.data.name, when: null }))),
+      h('div', { className: 'sec' }, h('h3', null, 'Tank water limits'),
+        h('dl', { className: 'res' }, ...L.flatMap(([c, side]) => limits[c]?.[side] == null ? [] : [
+          h('dt', { key: c }, `${E.components[c]} ${side}`), h('dd', { key: c + 'v' }, `${fmt(limits[c][side], 2)} ${E.units[c]}`)])),
+        h('p', { className: 'hint', style: { margin: '4px 0 0' } }, 'From the unit\'s treatment assumptions — ', h('a', { href: E.requirementsUrl }, 'change on step 04'), '.')),
+      h(Library, lib),
+      h('p', { className: 'hint', style: { marginTop: 12 } }, 'Click an item or a pipe to see its water. Delete removes the selection. Items with a standard or a unit price are carried to Equipment and CAPEX.'));
+  }
+
+  // ---------- editor ----------
+  function Editor() {
+    const init = useMemo(() => toRF(E.diagram), []);
+    const [nodes, setNodes, onNodesChange] = useNodesState(init.nodes);
+    const [edges, setEdges, onEdgesChange] = useEdgesState(init.edges);
+    // tank water limits come from the unit's treatment assumptions (step 04), not from the drawing
+    const [limits, setLimits] = useState(E.limits);
+    const [results, setResults] = useState(null);
+    const [sel, setSel] = useState(null); // {kind:'node'|'edge', id}
+    const [state, setState] = useState({ text: 'solving…', cls: 'busy' });
+    const rf = useReactFlow();
+    // snapshot for reports: fit the whole drawing once every node has its size, then say it is ready
+    useEffect(() => {
+      if (!E.print) return;
+      const t = setTimeout(() => { rf.fitView({ padding: 0.03 }); setTimeout(() => { document.body.dataset.ready = '1'; }, 400); }, 900);
+      return () => clearTimeout(t);
+    }, []);
+    const wrap = useRef(null);
+    // "unsaved" means the diagram differs from what was last saved (or loaded) — not that some
+    // event fired: React Flow updates its own state while mounting, which must not count.
+    const content = d => JSON.stringify({ ...d, nodes: d.nodes.map(n => ({ ...n, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) } })) });
+    const current = content(fromRF(nodes, edges, limits));
+    const savedSig = useRef(null);
+    if (savedSig.current === null) savedSig.current = current;
+    const dirty = current !== savedSig.current;
+
+    // one batch through this unit: which day of it the tanks show (its fish, feed and loads); the heaviest by default.
+    // An hour of that day spreads the feed over the feeding hours: TSS follows the feed of that hour, O₂ use,
+    // TAN and CO₂ a resting share round the clock plus the rest while feeding. CO₂ keeps the day's own
+    // fish CO₂/O₂ ratio (simulate's co2_per_o2, not a hardcoded 44/32) at the O₂ metabolic rate.
+    const [day, setDay] = useState(E.peakDay ?? 0);
+    const FEED0 = { from: 7, to: 19, base: 40 };
+    const [feeding, setFeeding] = useState(() => { try { return { ...FEED0, ...JSON.parse(localStorage.getItem('ras-feeding') || '{}') }; } catch (e) { return FEED0; } });
+    const [hour, setHour] = useState(null);   // null = daily average
+    const setFeed = (k, v) => setFeeding(f => { const n = { ...f, [k]: v };
+      try { localStorage.setItem('ras-feeding', JSON.stringify(n)); } catch (e) { /* private mode */ } return n; });
+    const feedHours = Math.max(((feeding.to - feeding.from) + 24) % 24 || 24, 1);
+    const feedingAt = hr => ((hr - feeding.from) + 24) % 24 < feedHours;
+    const fishOf = (i, hr) => {
+      const d = (E.days || [])[i];
+      if (!d || !(d[0] > 0)) return null;
+      const [feed, biomass, count, age, tan, tss, co2, o2, oz] = d;
+      const f = { feed_kgd: feed, biomass_kg: biomass, count, age, tan_per_feed: tan / feed, tss_per_feed: tss / feed,
+                  co2_per_feed: co2 / feed, o2_per_feed: o2 / feed, ozone_per_feed: oz / feed };
+      if (hr == null) return f;
+      const b = Math.min(Math.max(feeding.base, 0), 100) / 100, on = feedingAt(hr);
+      const feedNow = on ? feed / feedHours : 0;                       // kg in this hour
+      const meta = on ? b + (1 - b) * 24 / feedHours : b;             // × the daily average rate
+      const o2Now = o2 * meta;
+      return { ...f, feed_now_kgh: feedNow,
+               loads: { tss_kgd: feedNow * 24 * tss / feed, tan_kgd: tan * meta, o2_kgd: o2Now, co2_kgd: co2 * meta } };
+    };
+    // solve whenever something other than positions changes
+    const signature = JSON.stringify([nodes.map(n => [n.id, n.data.kind, n.data.spec, n.data.outlets]), edges.map(e => [e.source, e.sourceHandle, e.target]), limits, day, hour, feeding]);
+    useEffect(() => {
+      setState({ text: 'solving…', cls: 'busy' });
+      const timer = setTimeout(() => {
+        fetch(E.urls.solve, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+                              body: JSON.stringify({ ...fromRF(nodes, edges, limits),
+                                                     targets: E.targets && { ...E.targets, fish: fishOf(day, hour) } }) })
+          .then(r => r.json()).then(res => {
+            setResults(res);
+            const n = res.ok ? Object.values(res.nodes).reduce((a, x) => a + x.warnings.length, 0) + res.warnings.length : 1;
+            setState(res.ok ? (n ? { text: `${n} warning${n > 1 ? 's' : ''}`, cls: 'bad' } : { text: 'balanced', cls: 'ok' }) : { text: 'not solvable', cls: 'bad' });
+          }).catch(() => setState({ text: 'solver unreachable', cls: 'bad' }));
+      }, 350);
+      return () => clearTimeout(timer);
+
+    // ── Custom Inputs: what-if solve with manual overrides ──
+    const ciBtn = document.getElementById('ci-solve');
+    if (ciBtn) {
+      ciBtn.addEventListener('click', function () {
+        const feed = parseFloat(document.getElementById('ci-feed').value) || null;
+        const temp = parseFloat(document.getElementById('ci-temp').value) || null;
+        const flow = parseFloat(document.getElementById('ci-flow').value) || null;
+        const out = document.getElementById('ci-result');
+        out.textContent = 'Solving with overrides…';
+        const diagram = fromRF(nodes, edges, limits);
+        fetch(E.urls.customSolve || E.urls.solve, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+          body: JSON.stringify({ diagram: diagram, ras: 0,
+                                 inputs: { feed_kgd: feed, temp_c: temp, flow_m3h: flow },
+                                 targets: E.targets && { ...E.targets, fish: fishOf(day, hour) } })
+        }).then(function (r) { return r.json(); }).then(function (res) {
+          if (!res.ok) { out.textContent = 'ERROR: ' + (res.error || 'solve failed'); return; }
+          var t = res.totals || {};
+          var warnings = res.warnings || [];
+          var lines = [
+            'Converged: ' + (res.converged ? 'YES' : 'NO') + ' | Warnings: ' + warnings.length,
+            'Recirc: ' + (t.recirculated_m3h || 0).toFixed(0) + ' m³/h | Makeup: ' + (t.makeup_m3h || 0).toFixed(1) + ' m³/h',
+            'O₂: ' + (t.pure_o2_kgd || 0).toFixed(1) + ' kg/d | CO₂ stripped: ' + (t.co2_stripped_kgd || 0).toFixed(1) + ' kg/d',
+            'TAN nitrified: ' + (t.tan_nitrified_kgd || 0).toFixed(2) + ' kg/d | Media: ' + (t.media_m3 || 0).toFixed(1) + ' m³'
+          ];
+          Object.values(res.nodes || {}).forEach(function (n, nid) {
+            if (n.warnings && n.warnings.length) {
+              lines.push('⚠ ' + nid + ': ' + n.warnings.join('; '));
+            }
+          });
+          warnings.forEach(function (w) { lines.push('⚠ ' + w); });
+          out.textContent = lines.join('\n');
+        }).catch(function () { out.textContent = 'ERROR: could not reach the solver'; });
+      });
+      document.getElementById('ci-clear').addEventListener('click', function () {
+        ['ci-feed', 'ci-temp', 'ci-flow'].forEach(function (id) { document.getElementById(id).value = ''; });
+        document.getElementById('ci-result').textContent = '';
+      });
+    }
+    }, [signature]);
+
+    const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() },
+                                             body: JSON.stringify(body) }).then(r => r.json());
+    const save = auto => {
+      const sent = current;
+      setState({ text: 'saving…', cls: 'busy' });
+      post(E.urls.save, fromRF(nodes, edges, limits))
+        .then(res => { savedSig.current = sent; setResults(res); setState({ text: auto ? 'saved automatically' : 'saved', cls: 'ok' }); })
+        .catch(() => setState({ text: 'save failed — check the server', cls: 'bad' }));
+    };
+    // autosave a moment after the diagram stops changing (data, pipes, positions)
+    const dragging = nodes.some(n => n.dragging);
+    useEffect(() => {
+      if (!dirty || dragging) return;
+      const timer = setTimeout(() => save(true), 1500);
+      return () => clearTimeout(timer);
+    }, [current, dragging]);
+    // undo / redo: every change of the diagram (after a drag ends) is one step
+    const hist = useRef({ past: [], future: [], last: current, skip: false });
+    const [, bump] = useState(0);
+    useEffect(() => {
+      const H = hist.current;
+      if (dragging || current === H.last) return;
+      if (H.skip) { H.skip = false; H.last = current; return; }
+      H.past.push(H.last);
+      if (H.past.length > 80) H.past.shift();
+      H.future = []; H.last = current; bump(x => x + 1);
+    }, [current, dragging]);
+    const restore = text => {
+      const d = JSON.parse(text), x = toRF(d);
+      hist.current.skip = true;
+      setNodes(x.nodes); setEdges(x.edges); setLimits(d.limits || E.limits); setSel(null);
+      bump(v => v + 1);
+    };
+    const undo = () => { const H = hist.current; if (!H.past.length) return; H.future.push(H.last); H.last = H.past.pop(); restore(H.last); };
+    const redo = () => { const H = hist.current; if (!H.future.length) return; H.past.push(H.last); H.last = H.future.pop(); restore(H.last); };
+    const undoRef = useRef({});
+    undoRef.current = { undo, redo };
+    useEffect(() => {
+      const onKey = e => {
+        if (!(e.ctrlKey || e.metaKey) || e.target.closest('input, textarea, select')) return;  // fields keep their own undo
+        const k = e.key.toLowerCase();
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoRef.current.undo(); }
+        else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); undoRef.current.redo(); }
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, []);
+    // warn before leaving with unsaved changes
+    const dirtyRef = useRef(false);
+    dirtyRef.current = dirty;
+    useEffect(() => {
+      const warn = e => { if (dirtyRef.current) { e.preventDefault(); e.returnValue = ''; } };
+      window.addEventListener('beforeunload', warn);
+      return () => window.removeEventListener('beforeunload', warn);
+    }, []);
+
+    // ---- library of saved diagrams ----
+    const [library, setLibrary] = useState(E.library || []);
+    const replaceWith = (d, label) => {
+      const x = toRF(d);
+      setNodes(x.nodes); setEdges(x.edges); setLimits(d.limits || E.limits); setSel(null);
+      setTimeout(() => rf.fitView({ padding: 0.1 }), 50);
+      setState({ text: `loaded ${label}`, cls: 'busy' });
+    };
+    const lib = {
+      library,
+      onSaveAs: name => {
+        const exists = library.some(t => t.name.toLowerCase() === name.toLowerCase());
+        if (exists && !confirm(`Overwrite the saved diagram "${name}"?`)) return;
+        post(E.urls.library, { name, source: E.source, diagram: fromRF(nodes, edges, limits) })
+          .then(res => { if (res.ok) { setLibrary(res.library); setState({ text: `saved to library as "${name}"`, cls: 'ok' }); } else setState({ text: res.error, cls: 'bad' }); });
+      },
+      onLoad: t => {
+        if (nodes.length && !confirm(`Replace the diagram on this RAS unit with "${t.name}"?`)) return;
+        fetch(E.urls.libraryItem.replace('{id}', t.id)).then(r => r.json()).then(res => replaceWith(res.diagram, `"${t.name}"`));
+      },
+      onDelete: t => {
+        if (!confirm(`Delete "${t.name}" from the library? Diagrams already loaded into RAS units stay.`)) return;
+        post(E.urls.libraryItem.replace('{id}', t.id), {}).then(res => setLibrary(res.library));
+      },
+      onDownload: () => {
+        const blob = new Blob([JSON.stringify({ format: 'ras-process-diagram', version: 1, source: E.source,
+                                                 diagram: fromRF(nodes, edges, limits) }, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${E.source.replace(/[^\w.-]+/g, '_')}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      },
+      onUpload: text => {
+        let d;
+        try { const parsed = JSON.parse(text); d = parsed.diagram || parsed; } catch (e) { d = null; }
+        if (!d || !Array.isArray(d.nodes)) { setState({ text: 'that file is not a process diagram', cls: 'bad' }); return; }
+        if (nodes.length && !confirm('Replace the diagram on this RAS unit with the opened file?')) return;
+        replaceWith(d, 'file');
+      },
+    };
+    const onConnect = useCallback(p => setEdges(es => addEdge({ ...p, id: `e${Date.now()}`, targetHandle: p.targetHandle || 'in', type: 'pipe', updatable: true,
+                                                                 markerEnd: { type: MarkerType.ArrowClosed } }, es)), []);
+    // only outlet -> inlet, never into make-up water, never into itself; gas lines only generator -> contactor
+    const kindOf = id => nodes.find(n => n.id === id)?.data.kind;
+    const isValidConnection = c => {
+      if (c.source === c.target) return false;
+      const gasOut = c.sourceHandle === 'gas', gasIn = c.targetHandle === 'gas';
+      if (gasOut || gasIn) return gasOut && gasIn && kindOf(c.target) === 'ozone';
+      return !!E.types[kindOf(c.target)]?.inputs;
+    };
+    // drag a pipe end to another port to reconnect it; drop it on empty canvas to remove it
+    const reconnected = useRef(true);
+    const onEdgeUpdateStart = () => { reconnected.current = false; };
+    const onEdgeUpdate = (old, conn) => {
+      reconnected.current = true;
+      if (conn.source === conn.target) return;
+      setEdges(es => reconnectEdge(old, { ...conn, targetHandle: conn.targetHandle || 'in' }, es, { shouldReplaceId: false }));
+    };
+    const onEdgeUpdateEnd = (_, edge) => {
+      if (!reconnected.current) { setEdges(es => es.filter(e => e.id !== edge.id)); setSel(null); }
+      reconnected.current = true;
+    };
+    // drag equipment from the palette onto the canvas
+    const onDragOver = ev => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; };
+    const onDrop = ev => {
+      ev.preventDefault();
+      const kind = ev.dataTransfer.getData(DRAG_TYPE);
+      if (!E.types[kind]) return;
+      const box = wrap.current.getBoundingClientRect();
+      add(kind, rf.project({ x: ev.clientX - box.left - 80, y: ev.clientY - box.top - 30 }));
+    };
+    const add = (kind, at) => {
+      const t = E.types[kind];
+      const box = wrap.current.getBoundingClientRect();
+      let pos = at || rf.project({ x: box.width / 2 - 80 + Math.random() * 60, y: box.height / 2 - 40 + Math.random() * 60 });
+      // added by a click: step aside from equipment already there, so new items do not stack on top of each other
+      if (!at) {
+        const near = q => nodes.some(n => Math.abs(n.position.x - q.x) < 150 && Math.abs(n.position.y - q.y) < 120);
+        for (let i = 0; i < 40 && near(pos); i++) pos = { x: pos.x + 170, y: pos.y };
+      }
+      const id = `${kind}${Date.now().toString(36)}`;
+      const spec = {}; t.spec.forEach(s => { if (s.default != null) spec[s.key] = s.default; });
+      setNodes(ns => [...ns.map(n => ({ ...n, selected: false })), { id, type: 'equip', position: pos, selected: true,
+        data: { kind, name: t.label, spec, outlets: {}, qty: 1, standard: '', unit_price: '', inlets: 1,
+                ...(kind === 'junction' ? { roles: { ...JDEF } } : {}) } }]);
+      setSel({ kind: 'node', id });
+    };
+    const update = (id, patch) => {
+      setNodes(ns => ns.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
+      // back to one inlet: pipes on the second inlet move to the first
+      if (Number(patch.inlets) === 1) setEdges(es => es.map(e => e.target === id && e.targetHandle === 'in2' ? { ...e, targetHandle: 'in' } : e));
+    };
+    const removeNode = id => { setNodes(ns => ns.filter(n => n.id !== id)); setEdges(es => es.filter(e => e.source !== id && e.target !== id)); setSel(null); };
+    const removeEdge = id => { setEdges(es => es.filter(e => e.id !== id)); setSel(null); };
+    const setEdge = (id, patch) => setEdges(es => es.map(e => e.id === id ? { ...e, ...patch } : e));
+    const bendEdge = (id, cx, cy) => setEdge(id, { cx, cy });
+    const selectEdge = id => {
+      setEdges(es => es.map(e => ({ ...e, selected: e.id === id })));
+      setNodes(ns => ns.map(n => n.selected ? { ...n, selected: false } : n));
+      setSel({ kind: 'edge', id });
+    };
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const [animate, setAnimate] = useState(!reduceMotion && !E.print);
+    // water quality written on the pipes (remembered per browser)
+    const QKEYS = [['tss', 'TSS', 1], ['tan', 'TAN', 2], ['co2', 'CO₂', 1], ['o2', 'O₂', 1], ['no3', 'NO₃', 1], ['temp', '°C', 1]];
+    const [showQ, setShowQ] = useState(() => { try { return JSON.parse(localStorage.getItem('ras-pipe-q')) || ['tss', 'tan', 'co2', 'o2']; } catch (e) { return ['tss', 'tan', 'co2', 'o2']; } });
+    const toggleQ = k => setShowQ(cur => { const v = cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k];
+      try { localStorage.setItem('ras-pipe-q', JSON.stringify(v)); } catch (e) { /* private mode */ } return v; });
+    const quality = c => QKEYS.filter(([k]) => showQ.includes(k))
+      .map(([k, lab, d]) => k === 'temp' ? `${fmt(c.temp, 1)} °C` : `${lab} ${fmt(c[k], d)}`).join(' · ');
+    // switch a connection-point port between inlet and outlet; its pipes cannot keep their direction
+    const toggleRole = (id, port) => {
+      setNodes(ns => ns.map(n => {
+        if (n.id !== id) return n;
+        const roles = rolesOf(n.data);
+        return { ...n, data: { ...n.data, roles: { ...roles, [port]: roles[port] === 'in' ? 'out' : 'in' } } };
+      }));
+      setEdges(es => es.filter(e => !((e.source === id && e.sourceHandle === port) || (e.target === id && e.targetHandle === port))));
+    };
+
+    const shownNodes = nodes.map(n => ({ ...n, data: { ...n.data, res: results?.ok ? results.nodes[n.id] : null } }));
+    const serviceOf = e => e.service || guessService(e, kindOf);
+    const shownEdges = edges.map(e => {
+      const r = results?.ok ? results.edges[e.id] : null;
+      const bad = r && r.exceed.length;
+      const sv = SERVICE[serviceOf(e)] || SERVICE.process;
+      const gas = serviceOf(e) === 'gas';
+      const color = bad ? 'var(--critical)' : e.selected ? 'var(--accent)' : sv.color;
+      return { ...e, type: 'pipe', updatable: true,
+               data: { label: gas ? 'O₃ gas' : r ? `${fmt(r.q)} m³/h` : '', bad, gas, cx: e.cx, cy: e.cy, animate: animate && r && r.q > 1e-9,
+                       quality: !gas && r && r.q > 1e-9 && showQ.length ? quality(r.c) : '',
+                       onDelete: removeEdge, onBend: bendEdge, onSelect: selectEdge },
+               style: { stroke: color, strokeDasharray: sv.dash || undefined,
+                        strokeWidth: gas ? 1.5 : r ? Math.min(1.5 + Math.log10(1 + r.q), 5) : 1.5 },
+               markerEnd: { type: MarkerType.ArrowClosed, color } };
+    });
+    const selNode = sel?.kind === 'node' && nodes.find(n => n.id === sel.id);
+    const when = hour == null ? 'daily average (feed ÷ 24)' : `${String(hour).padStart(2, '0')}:00 · ${feedingAt(hour) ? 'feeding' : 'not feeding'}`;
+    const selEdge = sel?.kind === 'edge' && edges.find(e => e.id === sel.id);
+    const PALETTE = [
+      ['Connections — not equipment', ['junction', 'splitter']],
+      ['Tanks', ['incubator', 'tank', 'tank_bottom', 'tank_center', 'tank_3', 'raceway']],
+      ['Treatment', ['rfs', 'drum_filter', 'sand_filter', 'biofilter', 'fbbr', 'degasser', 'cone', 'jet_rect', 'jet_round', 'ozone_generator', 'ozone', 'uv', 'other']],
+      ['Pumps & sumps', ['reservoir', 'pump', 'sump']],
+      ['Heating & cooling', ['chiller', 'hx_plate', 'hx_tube']],
+      ['Boundaries', ['makeup', 'discharge']],
+    ];
+
+    return h('div', { className: 'editor' },
+      h('div', { className: 'panel palette' },
+        h('p', { className: 'hint', style: { margin: '0 0 8px' } }, 'Drag onto the canvas (or click to add).'),
+        PALETTE.map(([group, kinds]) => h('div', { key: group, className: `pgrp${group.startsWith('Connections') ? ' conn' : ''}` },
+          h('h3', null, group),
+          kinds.filter(k => E.types[k]).map(k => h('button', { key: k, type: 'button', draggable: true, style: { '--c': `var(${COLOR[k]})` },
+                                      onDragStart: ev => { ev.dataTransfer.setData(DRAG_TYPE, k); ev.dataTransfer.effectAllowed = 'copy'; },
+                                      onClick: () => add(k) },
+                     h('span', { className: 'ps sym', dangerouslySetInnerHTML: { __html: `<svg viewBox="0 0 ${WIDE[k] || SW} ${SH}" aria-hidden="true">${SYM[k] || SYM.other}</svg>` } }),
+                     E.types[k].label.replace(/^Fish tank /, 'Tank '))))),
+        h('div', { className: 'port-key' }, h('span', null, h('i', { style: { background: 'var(--accent)' } }), 'inlet'),
+          h('span', null, h('i', { style: { background: 'var(--s2)' } }), 'outlet')),
+        h('div', { className: 'pipe-key' }, h('h3', null, 'Pipes'),
+          Object.entries(SERVICE).map(([k, v]) => h('div', { key: k },
+            h('svg', { width: 30, height: 8, 'aria-hidden': true },
+              h('line', { x1: 1, y1: 4, x2: 29, y2: 4, stroke: v.color, strokeWidth: 2.5, strokeDasharray: v.dash || undefined })),
+            v.label))),
+        h('details', { className: 'howto' }, h('summary', null, 'How to connect pipes'),
+          h('p', { className: 'hint', style: { margin: '6px 0 0' } }, 'Drag from an outlet to an inlet. Remove a pipe with its × or the Delete key; Ctrl+Z undoes any change; drag a pipe end to another port to move it, or onto empty canvas to remove it. Set a connection point\'s inlets and outlets in its specification on the right.'))),
+      h('div', { className: 'canvas', ref: wrap, onDragOver, onDrop },
+        h('div', { className: 'toolbar' },
+          h('button', { type: 'button', className: 'btn primary', onClick: () => save(false) }, dirty ? 'Save now •' : 'Saved'),
+          h('button', { type: 'button', className: 'btn', disabled: !hist.current.past.length, onClick: undo, title: 'Undo (Ctrl+Z)' }, '↶ Undo'),
+          h('button', { type: 'button', className: 'btn', disabled: !hist.current.future.length, onClick: redo, title: 'Redo (Ctrl+Y)' }, '↷ Redo'),
+          h('button', { type: 'button', className: 'btn', onClick: () => { if (confirm('Remove everything and start from an empty canvas?')) { setNodes([]); setEdges([]); setSel(null); } } }, 'Start empty'),
+          h('button', { type: 'button', className: 'btn', onClick: () => { if (confirm('Replace this diagram with the automatic layout?')) document.getElementById('reset').submit(); } }, 'Reset to automatic'),
+          h('label', { className: 'btn anim' }, h('input', { type: 'checkbox', checked: animate, onChange: e => setAnimate(e.target.checked) }), 'Animate flow'),
+          (E.days || []).length > 0 && h('span', { className: 'daybar', title: 'One batch through this unit, day by day' }, 'Batch day',
+            h('input', { type: 'range', min: 0, max: E.days.length - 1, value: day, 'aria-label': 'Day of the batch in this unit',
+                         onChange: e => setDay(Number(e.target.value)) }),
+            h('b', null, `age ${E.days[day][3]} d · ${fmt(E.days[day][9], E.days[day][9] < 10 ? 2 : 0)} g`),
+            (() => { const f = fishOf(day); return f
+              ? h('span', null, `${fmt(f.count, 0)} fish · ${fmt(f.biomass_kg, 0)} kg · ${fmt(f.feed_kgd, 1)} kg feed/day`)
+              : h('span', null, 'no fish'); })(),
+            day !== E.peakDay ? h('button', { type: 'button', onClick: () => setDay(E.peakDay) }, 'Heaviest day') : h('span', { className: 'pk' }, 'heaviest day')),
+          (E.days || []).length > 0 && h('span', { className: 'daybar', title: 'Feed given over the feeding hours; O₂ use and TAN keep a resting share round the clock' }, 'Hour',
+            h('select', { value: hour ?? '', 'aria-label': 'Hour of the day', onChange: e => setHour(e.target.value === '' ? null : Number(e.target.value)) },
+              h('option', { value: '' }, 'daily average'),
+              ...Array.from({ length: 24 }, (_, i) => h('option', { key: i, value: i }, `${String(i).padStart(2, '0')}:00${feedingAt(i) ? ' · feeding' : ''}`))),
+            'feeding', h('input', { type: 'number', min: 0, max: 23, value: feeding.from, className: 'hr', 'aria-label': 'Feeding starts at', onChange: e => setFeed('from', Number(e.target.value) || 0) }),
+            '–', h('input', { type: 'number', min: 1, max: 24, value: feeding.to, className: 'hr', 'aria-label': 'Feeding ends at', onChange: e => setFeed('to', Number(e.target.value) || 24) }),
+            'h · resting O₂', h('input', { type: 'number', min: 0, max: 100, value: feeding.base, className: 'hr', 'aria-label': 'Resting share of O₂ use, %', onChange: e => setFeed('base', Number(e.target.value)) }), '%',
+            hour != null && (() => { const f = fishOf(day, hour); return f ? h('b', null, `${fmt(f.feed_now_kgh, 2)} kg feed this hour`) : null; })()),
+          h('span', { className: 'showq', title: 'Water quality written on every pipe, mg/L' }, 'On pipes',
+            ...QKEYS.map(([k, lab]) => h('button', { key: k, type: 'button', className: showQ.includes(k) ? 'on' : '', 'aria-pressed': showQ.includes(k),
+                                                     onClick: () => toggleQ(k) }, k === 'temp' ? 'Temp' : lab))),
+          h('span', { className: `state ${state.cls}` }, state.text)),
+        nodes.length === 0 && h('div', { className: 'empty-canvas' }, 'Drag equipment here from the list on the left'),
+        h(Flow, { nodes: shownNodes, edges: shownEdges, nodeTypes, edgeTypes,
+                  onNodesChange,
+                  onEdgesChange, onConnect, isValidConnection, onEdgeUpdate, onEdgeUpdateStart, onEdgeUpdateEnd, edgeUpdaterRadius: 14,
+                  fitView: true, minZoom: 0.08, deleteKeyCode: ['Delete'], snapToGrid: true, snapGrid: [10, 10],
+                  connectionLineType: 'smoothstep', connectionRadius: 26,
+                  onNodeClick: (_, n) => setSel({ kind: 'node', id: n.id }), onEdgeClick: (_, e) => setSel({ kind: 'edge', id: e.id }),
+                  onPaneClick: () => setSel(null), onNodesDelete: () => setSel(null), onEdgesDelete: () => setSel(null),
+                  defaultEdgeOptions: { type: 'pipe' } },
+          h(Background, { gap: 20, size: 1, color: 'var(--grid)' }), h(Controls, { showInteractive: false }),
+          h(MiniMap, { pannable: true, zoomable: true, nodeColor: n => getComputedStyle(document.documentElement).getPropertyValue(COLOR[n.data.kind]).trim() }))),
+      h('div', { className: 'panel inspector' },
+        selNode ? h(NodeInspector, { node: selNode, results: results?.ok ? results : null, edges, nodes, update: p => update(selNode.id, p),
+                                     remove: () => removeNode(selNode.id), toggle: port => toggleRole(selNode.id, port), when })
+        : selEdge ? h(EdgeInspector, { edge: selEdge, results: results?.ok ? results : null, nodes, remove: () => removeEdge(selEdge.id),
+                                       setEdge: p => setEdge(selEdge.id, p), service: serviceOf(selEdge) })
+        : h(SystemPanel, { results, limits, setLimits, isDefault: E.isDefault, dirty, lib, when,
+                           tanks: nodes.filter(n => E.types[n.data.kind]?.tank) })));
+  }
+
+  class ErrorBoundary extends React.Component {
+    constructor(props) { super(props); this.state = { failed: false }; }
+    static getDerivedStateFromError() { return { failed: true }; }
+    componentDidCatch(error, info) { console.error('Diagram editor failed to render:', error, info); }
+    render() { return this.state.failed ? this.props.fallback : this.props.children; }
+  }
+  const crashCard = h('div', { className: 'card err' },
+    h('p', null, 'The diagram editor could not be shown.'),
+    h('button', { type: 'button', className: 'btn', onClick: resetDiagram }, 'Reset the diagram'));
+
+  ReactDOM.createRoot(app).render(h(ErrorBoundary, { fallback: crashCard },
+    h(ReactFlowProvider, null, h(Editor))));
+})();
+</script>
+{% endif %}
+{% endblock %}

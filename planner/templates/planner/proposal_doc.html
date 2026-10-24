@@ -1,0 +1,255 @@
+{% load fmt %}{% load static %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proposal {{ p.number }} · {{ p.title }}</title>
+<link rel="stylesheet" href="{% static 'vendor/fonts.css' %}">
+<style>
+:root { color-scheme: light;
+  --ink: #0f1f1e; --ink-2: #43524f; --muted: #75837f; --rule: #d3dbd8; --wash: #eef3f1; --accent: #0b6466; --deep: #0e2423;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; --body: "Barlow", "Segoe UI", Arial, sans-serif;
+  --mono: "IBM Plex Mono", Consolas, monospace; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #d9dfdd; color: var(--ink); font: 10.5pt/1.5 var(--body); }
+.doc { max-width: 210mm; margin: 24px auto; background: #fff; padding: 18mm 16mm; box-shadow: 0 2px 16px #0002; }
+.pdf body, body.pdf { background: #fff; }
+body.pdf .doc { margin: 0; padding: 0; max-width: none; box-shadow: none; }
+.bar { position: sticky; top: 0; z-index: 2; display: flex; gap: 10px; justify-content: center; padding: 10px; background: var(--deep); }
+.bar a { color: #fff; font: 500 14px var(--body); text-decoration: none; padding: 6px 12px; border: 1px solid #ffffff44; border-radius: 5px; }
+body.pdf .bar { display: none; }
+
+h1, h2, h3 { font-family: var(--display); margin: 0; }
+h2 { font-size: 17pt; font-weight: 600; letter-spacing: 0.01em; margin: 0 0 8pt; padding-bottom: 4pt; border-bottom: 1.5pt solid var(--accent);
+  break-after: avoid; display: flex; gap: 10pt; align-items: baseline; }
+h2 .n { font: 500 12pt var(--mono); color: var(--accent); }
+h3 { font-size: 11pt; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); margin: 12pt 0 5pt; break-after: avoid; }
+section { margin-top: 16pt; }
+section.page { break-before: page; margin-top: 0; }
+p { margin: 0 0 7pt; }
+.pre { white-space: pre-line; }
+.muted { color: var(--muted); }
+.note { color: var(--muted); font-size: 9pt; margin-top: 5pt; }
+
+/* cover */
+.cover { min-height: 255mm; display: flex; flex-direction: column; }
+body:not(.pdf) .cover { min-height: 0; }
+.cover .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 20pt; }
+.cover .logo { max-height: 22mm; max-width: 70mm; }
+.cover .wordmark { font: 700 20pt var(--display); letter-spacing: 0.02em; color: var(--deep); }
+.cover .meta { text-align: right; font: 400 9pt/1.6 var(--mono); color: var(--ink-2); }
+.cover .meta b { color: var(--ink); font-weight: 500; }
+.cover .title { margin: 48mm 0 0; }
+.cover .eyebrow { font: 600 11pt var(--display); letter-spacing: 0.24em; text-transform: uppercase; color: var(--accent); }
+.cover h1 { font-size: 30pt; line-height: 1.08; font-weight: 700; margin-top: 6pt; max-width: 150mm; }
+.cover .rule { height: 4pt; width: 46mm; background: var(--accent); margin: 14pt 0 0; }
+.parties { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 14pt; padding-top: 22mm; }
+.party { border-top: 1pt solid var(--rule); padding-top: 8pt; font-size: 9.5pt; line-height: 1.55; }
+.party .role { font: 600 8.5pt var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 3pt; }
+.party .name { font: 600 12pt var(--display); }
+
+/* contents */
+ol.toc { list-style: none; padding: 0; margin: 0; columns: 1; }
+ol.toc li { display: flex; gap: 10pt; padding: 4pt 0; border-bottom: 0.5pt dotted var(--rule); font-size: 11pt; }
+ol.toc .n { font: 500 10pt var(--mono); color: var(--accent); min-width: 18pt; }
+
+/* tables */
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin: 4pt 0 6pt; break-inside: auto; }
+th, td { padding: 4pt 6pt; border-bottom: 0.5pt solid var(--rule); vertical-align: top; }
+th { font: 600 8pt var(--display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); text-align: left; border-bottom: 1pt solid var(--ink-2); }
+td.r, th.r { text-align: right; }
+td.num { font: 400 9pt var(--mono); text-align: right; white-space: nowrap; }
+td.nw { white-space: nowrap; }
+tr { break-inside: avoid; }
+tfoot td { font-weight: 600; border-top: 1pt solid var(--ink-2); border-bottom: 0; }
+tfoot td.num { font-weight: 500; }
+.small td, .small th { font-size: 8.5pt; padding: 3pt 4pt; }
+.wp td:first-child { font-weight: 600; width: 34%; }
+.wp td.notes { color: var(--ink-2); font-size: 9.5pt; }
+.total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 8pt; padding: 8pt 10pt; background: var(--wash); border-left: 3pt solid var(--accent); }
+.total b { font: 600 12pt var(--display); letter-spacing: 0.04em; text-transform: uppercase; }
+.total span { font: 500 15pt var(--mono); }
+
+.kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin: 6pt 0 8pt; }
+.kv div { background: #fff; padding: 6pt 8pt; }
+.kv .k { font: 600 7.5pt var(--display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.kv .v { font: 500 13pt var(--mono); margin-top: 2pt; }
+.kv .v small { font-size: 8pt; color: var(--muted); margin-left: 3pt; }
+
+/* gantt */
+.gantt { margin: 6pt 0; font-size: 7.5pt; }
+.gantt .row { display: grid; grid-template-columns: 22pt minmax(0, 1fr); align-items: center; height: 9pt; }
+.gantt .lab { font-family: var(--mono); color: var(--muted); }
+.gantt .track { position: relative; height: 6pt; background: var(--wash); }
+.gantt .seg { position: absolute; top: 0; bottom: 0; border-radius: 1.5pt; }
+.legend { display: flex; flex-wrap: wrap; gap: 4pt 14pt; font-size: 8.5pt; color: var(--ink-2); margin-top: 4pt; }
+.legend i { display: inline-block; width: 10pt; height: 5pt; border-radius: 1.5pt; margin-right: 4pt; vertical-align: middle; }
+.sw { display: inline-block; width: 7pt; height: 7pt; border-radius: 2pt; margin-right: 4pt; vertical-align: baseline; }
+
+.figure { break-inside: avoid; margin: 8pt 0 12pt; }
+/* process drawings get landscape pages */
+@page wide { size: A4 landscape; }
+section.wide { page: wide; break-before: page; margin-top: 0; }
+section.wide + section.wide { margin-top: 0; }
+body:not(.pdf) section.wide { margin-top: 20pt; }
+.figure.full { break-inside: auto; }
+.figure.full img { width: auto; max-width: 100%; max-height: 128mm; margin: 0 auto; }
+.figure img { width: 100%; border: 0.5pt solid var(--rule); display: block; }
+.figure .cap { font-size: 9pt; color: var(--ink-2); margin-top: 4pt; display: flex; gap: 14pt; flex-wrap: wrap; }
+.figure .cap b { font-family: var(--display); font-size: 10.5pt; color: var(--ink); }
+.clause { margin-bottom: 8pt; break-inside: avoid; }
+.clause h4 { font: 600 10.5pt var(--display); margin: 0 0 2pt; }
+.sign { margin-top: 26pt; display: grid; grid-template-columns: 1fr 1fr; gap: 24pt; break-inside: avoid; }
+.sign div { border-top: 0.75pt solid var(--ink-2); padding-top: 5pt; font-size: 9pt; color: var(--ink-2); }
+.err { padding: 8pt 10pt; border-left: 3pt solid #c2413b; background: #fbeeee; margin: 8pt 0; }
+.draftband { border: 1.5pt solid #8a8a8a; background: #e6e6e6; color: #3a3a3a; font: 600 11pt var(--display);
+  letter-spacing: 0.08em; text-align: center; padding: 6pt 10pt; margin: 0 0 14pt; }
+</style>
+</head>
+<body class="{% if pdf %}pdf{% endif %}">
+<div class="bar"><a href="{% url 'proposal_edit' p.pk %}">← Edit</a><a href="{% url 'proposal_pdf' p.pk %}">Download PDF</a></div>
+<div class="doc">
+{% if draft and pdf %}<div class="draftband">DRAFT — preflight incomplete</div>{% endif %}
+
+<!-- cover -->
+<div class="cover">
+  <div class="top">
+    <div>{% if company.logo %}<img class="logo" src="{{ company.logo }}" alt="{{ company.name }}">{% else %}<div class="wordmark">{{ company.name }}</div>{% endif %}</div>
+    <div class="meta">Proposal no. <b>{{ p.number }}</b><br>Date <b>{{ p.date|date:"j F Y" }}</b>{% if p.valid_until %}<br>Valid until <b>{{ p.valid_until|date:"j F Y" }}</b>{% endif %}</div>
+  </div>
+  <div class="title">
+    <div class="eyebrow">Proposal</div>
+    <h1>{{ p.title }}</h1>
+    <div class="rule"></div>
+  </div>
+  <div class="parties">
+    <div class="party"><div class="role">Supplier</div><div class="name">{{ company.name }}</div>
+      {% if company.address %}<div class="pre">{{ company.address }}</div>{% endif %}{% if company.country %}<div>{{ company.country }}</div>{% endif %}
+      {% if company.org_no %}<div>Org. no. {{ company.org_no }}</div>{% endif %}{% if company.vat_no %}<div>VAT {{ company.vat_no }}</div>{% endif %}
+      {% if company.phone %}<div>{{ company.phone }}</div>{% endif %}{% if company.email %}<div>{{ company.email }}</div>{% endif %}{% if company.website %}<div>{{ company.website }}</div>{% endif %}</div>
+    <div class="party"><div class="role">Customer</div><div class="name">{{ p.customer_name|default:"—" }}</div>
+      {% if p.customer_address %}<div class="pre">{{ p.customer_address }}</div>{% endif %}
+      {% if p.customer_reg %}<div>{{ p.customer_reg }}</div>{% endif %}{% if p.customer_contact %}<div>Attn. {{ p.customer_contact }}</div>{% endif %}
+      {% if p.customer_phone %}<div>{{ p.customer_phone }}</div>{% endif %}{% if p.customer_email %}<div>{{ p.customer_email }}</div>{% endif %}</div>
+  </div>
+</div>
+
+<section class="page"><h2>Contents</h2>
+  <ol class="toc">{% for k, n, label in toc %}<li><span class="n">{{ n }}</span>{{ label }}</li>{% endfor %}</ol>
+  {% if from_snapshot and snapshot_at %}<p class="note">The figures in this document are from the archived snapshot of {{ snapshot_at|date:"j F Y" }}; the scenario it was made from no longer exists.</p>{% endif %}
+  {% if error and not pdf %}<div class="err">{{ error }}</div>{% endif %}
+</section>
+
+{% for k, n, label in toc %}
+{% if k == "intro" %}
+<section><h2><span class="n">{{ n }}</span>{{ label }}</h2><div class="pre">{{ intro }}</div></section>
+
+{% elif k == "terms" %}
+<section><h2><span class="n">{{ n }}</span>{{ label }}</h2><div class="pre">{{ terms }}</div></section>
+
+{% elif k == "pricing" %}
+<section class="page"><h2><span class="n">{{ n }}</span>{{ label }}</h2>
+  <table class="wp"><thead><tr><th>Work package</th><th>Scope</th>{% if package_prices %}<th class="r">{{ p.currency }}</th>{% endif %}</tr></thead>
+    <tbody>{% for w in packages %}<tr><td>{{ w.name }}</td><td class="notes">{{ w.notes }}</td>{% if package_prices %}<td class="num">{% if w.price is not None %}{{ w.price|num:0 }}{% else %}incl.{% endif %}</td>{% endif %}</tr>{% endfor %}</tbody>
+  </table>
+  <div class="total"><b>Total design fee</b><span>{{ fee_total|num:0 }} {{ p.currency }}</span></div>
+  {% if vat is not None %}<p class="note">Plus VAT {{ p.vat_pct|num:0 }} %: {{ vat|num:0 }} {{ p.currency }}. Total incl. VAT {{ fee_incl_vat|num:0 }} {{ p.currency }}.</p>
+  {% else %}<p class="note">Prices exclude VAT.</p>{% endif %}
+  {% if capex %}<p class="note">The investment and operating cost estimates in sections {{ num.capex|default:"" }}{% if num.capex and num.opex %} and {% endif %}{{ num.opex|default:"" }} are for planning; they are not part of the price above.</p>{% endif %}
+</section>
+
+{% elif k == "sizing" %}
+<section class="page"><h2><span class="n">{{ n }}</span>{{ label }}</h2>
+  <p>The facility is sized from the production plan: each RAS unit for the largest load of all batches it holds at the same time.</p>
+  <table class="small">
+    <thead><tr><th>RAS unit</th><th class="r">Fish weight g</th><th class="r">Days</th><th class="r">Tanks</th><th class="r">Tank m³</th><th class="r">Peak biomass t</th><th class="r">Recirculation m³/h</th><th class="r">Peak feed kg/d</th><th class="r">Biofilter m³</th><th class="r">Temp. °C</th><th>Oxygen</th></tr></thead>
+    <tbody>{% for s in sizing %}<tr><td class="nw"><span class="sw" style="background:var(--s{{ forloop.counter }})"></span>{{ s.name }}</td>
+      <td class="num">{{ s.w_in|num:1 }} – {{ s.w_out|num:0 }}</td><td class="num">{{ s.days }}</td><td class="num">{{ s.tanks }}</td><td class="num">{{ s.tank_m3|num:1 }}</td>
+      <td class="num">{{ s.biomass_t|num:2 }}</td><td class="num">{% if s.flow is not None %}{{ s.flow|num:0 }}{% else %}–{% endif %}</td><td class="num">{{ s.feed|num:1 }}</td>
+      <td class="num">{% if s.biofilter_m3 is not None %}{{ s.biofilter_m3|num:1 }}{% else %}–{% endif %}</td><td class="num">{{ s.temp|num:1 }}</td><td>{{ s.oxygen }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% if p.sizing_note %}<p class="pre">{{ p.sizing_note }}</p>{% endif %}
+</section>
+
+{% elif k == "plan" %}
+<section class="page"><h2><span class="n">{{ n }}</span>{{ label }}</h2>
+  <div class="kv">
+    <div><div class="k">First stocking</div><div class="v" style="font-size:11pt">{{ plan.start_date|date:"j M Y" }}</div></div>
+    <div><div class="k">Stocking interval</div><div class="v">{{ plan.interval_days }}<small>days</small></div></div>
+    <div><div class="k">Stocking to harvest</div><div class="v">{{ res.harvest_age }}<small>days</small></div></div>
+    <div><div class="k">Harvest per year</div><div class="v">{% if res.annual_harvest_t %}{{ res.annual_harvest_t|num:1 }}<small>t</small>{% else %}–{% endif %}</div></div>
+  </div>
+  <h3>Batches through the RAS units</h3>
+  <div class="gantt">{% for r in gantt %}<div class="row"><span class="lab">{{ r.label }}</span><span class="track">{% for b in r.bars %}<span class="seg" style="left:{{ b.x|floatformat:2 }}%; width:{{ b.w|floatformat:2 }}%; background:var(--s{{ b.stage|add:1 }})"></span>{% endfor %}</span></div>{% endfor %}</div>
+  <div class="legend">{% for s in stage_names %}<span><i style="background:var(--s{{ forloop.counter }})"></i>{{ s }}</span>{% endfor %}<span class="muted">· {{ res.horizon }} days from {{ plan.start_date|date:"j M Y" }}{% if gantt_more %} · first 24 of {{ batches }} batches{% endif %}</span></div>
+  {% if harvests %}
+  <h3>Harvests</h3>
+  <table class="small"><thead><tr><th>Batch</th><th>Stocked</th><th>Harvested</th><th class="r">Fish</th><th class="r">Weight g</th><th class="r">Biomass t</th></tr></thead>
+    <tbody>{% for h in harvests %}<tr><td>B{{ h.batch }}</td><td>{{ h.stock_date|date:"j M Y" }}</td><td>{{ h.date|date:"j M Y" }}</td><td class="num">{{ h.count|num:0 }}</td><td class="num">{{ h.weight_g|num:0 }}</td><td class="num">{{ h.biomass_t|num:2 }}</td></tr>{% endfor %}</tbody></table>
+  {% if more_harvests %}<p class="note">… and {{ more_harvests }} more harvests within the plan.</p>{% endif %}
+  {% endif %}
+</section>
+
+{% elif k == "process" %}
+{% for u in process %}
+<section class="wide">{% if forloop.first %}<h2><span class="n">{{ n }}</span>{{ label }}</h2>{% else %}<h3>{{ label }} — continued</h3>{% endif %}
+  {% if forloop.first %}<p>Process diagrams of the RAS units with their steady-state water balance: flows in m³/h on every pipe.</p>{% endif %}
+  <div class="figure full"><img src="{{ u.img }}" alt="Process diagram of {{ u.name }}">
+    <div class="cap"><b>{{ u.name }}</b><span>{{ u.items }} items</span>{% if u.flow %}<span>largest flow {{ u.flow|num:0 }} m³/h</span>{% endif %}{% if u.makeup %}<span>make-up {{ u.makeup|num:1 }} m³/h</span>{% endif %}{% if u.pump_kw %}<span>pumps {{ u.pump_kw|num:1 }} kW</span>{% endif %}{% if u.cooling %}<span>cooling {{ u.cooling|num:1 }} kW</span>{% endif %}</div></div>
+  {% if u.checks %}
+  <table class="small"><thead><tr><th>Design check</th><th class="r">Required</th><th class="r">Designed</th><th>Unit</th><th></th></tr></thead>
+    <tbody>{% for c in u.checks %}<tr><td>{{ c.check }}</td><td class="num">{{ c.target|num:1 }}</td><td class="num">{{ c.actual|num:1 }}</td><td>{{ c.unit }}</td>
+      <td>{% if c.status == 'ok' %}✓ met{% elif c.status == 'warn' %}≈ check{% elif c.status == 'alarm' %}✕ short{% endif %}</td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% elif k == "capex" %}
+<section class="page"><h2><span class="n">{{ n }}</span>{{ label }}</h2>
+  <p>Estimated investment for the facility, by project area. Main equipment prices exclude installation, customs, shipping and storage unless listed.</p>
+  {% if not capex.grand_total %}<p class="err">No prices have been entered on the CAPEX page yet, so the estimate is empty.</p>{% endif %}
+  <h3>By cost group</h3>
+  <table><thead><tr><th>Group</th><th class="r">{{ capex.currency }}</th><th class="r">Share</th></tr></thead>
+    <tbody>{% for g, v, w in capex.by_group %}<tr><td>{{ g }}</td><td class="num">{{ v|num:0 }}</td><td class="num">{% if capex.grand_total %}{% widthratio v capex.grand_total 100 %} %{% endif %}</td></tr>{% endfor %}</tbody>
+    <tfoot><tr><td>Total investment</td><td class="num">{{ capex.grand_total|num:0 }}</td><td></td></tr></tfoot></table>
+  {% if by_unit %}
+  <h3>Equipment by RAS unit</h3>
+  <table><thead><tr><th>RAS unit</th><th class="r">{{ capex.currency }}</th></tr></thead>
+    <tbody>{% for name, v in by_unit %}<tr><td>{{ name }}</td><td class="num">{{ v|num:0 }}</td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+  {% if capex.per_tonne %}<p class="note">{{ capex.per_tonne|num:0 }} {{ capex.currency }} per tonne of yearly harvest.</p>{% endif %}
+</section>
+
+{% elif k == "opex" %}
+<section><h2><span class="n">{{ n }}</span>{{ label }}</h2>
+  <p>Operating cost for one year of production{% if o.scaled %} (plan scaled to a year){% endif %}.</p>
+  <table><thead><tr><th>Cost</th><th class="r">Quantity</th><th>Unit</th><th class="r">{{ capex.currency }} / year</th></tr></thead>
+    <tbody>{% for ln in o.lines %}{% if ln.cost %}<tr><td>{{ ln.item }}</td><td class="num">{% if ln.qty is not None %}{{ ln.qty|num:0 }}{% endif %}</td><td>{{ ln.unit }}</td><td class="num">{{ ln.cost|num:0 }}</td></tr>{% endif %}{% endfor %}</tbody>
+    <tfoot><tr><td colspan="3">Operating cost per year</td><td class="num">{{ o.total|num:0 }}</td></tr></tfoot></table>
+  <div class="kv">
+    <div><div class="k">Harvest per year</div><div class="v">{{ o.harvest_kg|num:0 }}<small>kg</small></div></div>
+    <div><div class="k">Cost per kg</div><div class="v">{% if o.cost_per_kg is not None %}{{ o.cost_per_kg|num:2 }}<small>{{ capex.currency }}</small>{% else %}–{% endif %}</div></div>
+    <div><div class="k">Incl. depreciation</div><div class="v">{% if o.full_cost_per_kg is not None %}{{ o.full_cost_per_kg|num:2 }}<small>{{ capex.currency }}</small>{% else %}–{% endif %}</div></div>
+    <div><div class="k">Electricity</div><div class="v">{{ o.kwh|num:0 }}<small>kWh</small></div></div>
+  </div>
+  {% if o.revenue is not None %}<p>At {{ o.prices.sale_price|num:2 }} {{ capex.currency }}/kg the yearly revenue is {{ o.revenue|num:0 }} {{ capex.currency }} and the result before depreciation {{ o.ebitda|num:0 }} {{ capex.currency }}{% if o.payback_years %}; the investment pays back in about {{ o.payback_years|num:1 }} years{% endif %}.</p>{% endif %}
+</section>
+
+{% elif k == "payment" %}
+<section class="page"><h2><span class="n">{{ n }}</span>{{ label }}</h2><div class="pre">{{ payment }}</div></section>
+
+{% elif k == "clauses" %}
+<section><h2><span class="n">{{ n }}</span>{{ label }}</h2>
+  {% for c in clauses %}<div class="clause"><h4>{{ n }}.{{ forloop.counter }} {{ c.title }}</h4><div class="pre">{{ c.text }}</div></div>{% endfor %}
+</section>
+{% endif %}
+{% endfor %}
+
+<div class="sign">
+  <div>For {{ company.name }}{% if company.signatory %}<br><b>{{ company.signatory }}</b>{% if company.signatory_title %}, {{ company.signatory_title }}{% endif %}{% endif %}<br>Date and signature</div>
+  <div>For {{ p.customer_name|default:"the customer" }}{% if p.customer_contact %}<br><b>{{ p.customer_contact }}</b>{% endif %}<br>Date and signature</div>
+</div>
+</div>
+</body>
+</html>

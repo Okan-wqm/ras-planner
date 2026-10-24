@@ -1,0 +1,354 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Units & tanks · {{ scenario.name }}{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 03 / 09 · Units &amp; tanks</div><h1>RAS units and tanks</h1>
+  <div class="sub">Split the fish's life into RAS units by weight, then choose the tanks of each unit and how many tanks a batch takes as it grows (grading). Tanks are shared between batches within a unit.</div></div></div>
+
+<form method="post">{% csrf_token %}
+  <input type="hidden" name="updated" value="{{ scenario.updated.isoformat }}">
+<section class="card section">
+      <h2>RAS units</h2>
+      <table class="stages" id="stages">
+        <thead><tr><th>RAS unit</th><th>Weight range</th><th>Exit weight [g]</th><th>Tanks</th><th>Tank retention [min]</th><th></th></tr></thead>
+        <tbody>
+        {% for pn in panels %}{% with st=pn.stage %}
+        <tr class="stage">
+          <td><span class="swatch" style="background:var(--s{{ forloop.counter }})"></span><input type="hidden" name="stage_id" value="{% if st.id %}{{ st.id }}{% else %}{{ forloop.counter0 }}{% endif %}"><input type="text" name="stage_name" value="{{ st.name }}" style="width:calc(100% - 20px)"></td>
+          <td class="range"></td>
+          <td><input type="number" step="any" name="stage_max" value="{{ st.max_weight_g|plain }}"></td>
+          <td><input type="number" min="1" name="stage_tanks" value="{{ st.n_tanks }}"></td>
+          <td><input type="number" step="any" name="stage_ret" value="{{ st.retention_min|plain }}"></td>
+          <td class="acts"><button type="button" class="btn toggle">Constants{% if pn.n_changed %} <span class="badge">{{ pn.n_changed }}</span>{% endif %}</button>
+            <button type="button" class="btn danger del" title="Remove RAS unit">✕</button></td>
+        </tr>
+        <tr class="panel" hidden><td colspan="6">
+          <div class="panel-head"><strong>{{ st.name }}</strong> constants · highlighted values override the scenario; the rest follow the scenario (<a href="{% url 'requirements' scenario.pk %}">Requirements</a>, <a href="{% url 'production' scenario.pk %}">Production plan</a>).</div>
+          <div class="pgroups">
+          {% for group, items in pn.groups %}
+            <div class="pgroup"><h3>{{ group }}</h3>
+            {% for f in items %}
+              <label class="prow{% if f.changed %} changed{% endif %}" title="Scenario value: {{ f.base }}">
+                <span>{{ f.label }}{% if f.unit %} <em>[{{ f.unit }}]</em>{% endif %}</span>
+                {% if f.is_bool %}
+                  <select name="ov_{{ f.key }}"><option value="True" {% if f.value %}selected{% endif %}>Yes</option><option value="False" {% if not f.value %}selected{% endif %}>No</option></select>
+                {% elif f.is_text %}
+                  <input type="text" name="ov_{{ f.key }}" value="{{ f.text }}">
+                {% else %}
+                  <input type="number" step="any" name="ov_{{ f.key }}" value="{{ f.text }}">
+                {% endif %}
+              </label>
+            {% endfor %}
+            </div>
+          {% endfor %}
+          </div>
+        </td></tr>
+        {% endwith %}{% endfor %}
+        </tbody>
+      </table>
+      <div class="help">Fish move to the next unit when they reach a unit's exit weight. The last unit's exit weight is the harvest weight.</div>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+        <button type="button" class="btn" id="add">+ Add RAS unit</button>
+        <button type="submit" class="btn primary">Save units and tanks</button>
+      </div>
+</section>
+
+{% if error %}
+<div class="card err">{{ error }} Lower the harvest weight or check the growth constants.</div>
+{% else %}
+<section class="card section" aria-label="Process train">
+  <div class="train-note"><h2>Process train</h2>
+    <span class="note" style="margin:0">Water level shows each unit's share of the total tank volume.</span></div>
+  <div class="train">
+    <div class="node end">
+      <div class="tag">Intake</div>
+      <div class="name">Stocking</div>
+      <div class="tank"></div>
+      <dl><dt>every</dt><dd>{{ plan.interval_days }} d</dd><dt>fish</dt><dd>{{ fish_per_batch|num:0 }}</dd></dl>
+    </div>
+    {% for d in designs %}
+    <div class="pipe"><div class="line"></div><span class="at">{{ d.weight_in|num:1 }} g</span></div>
+    <div class="node" style="--c: var(--s{{ forloop.counter }})">
+      <div class="tag">RAS {{ forloop.counter|stringformat:"02d" }}{% if not d.pure_oxygen %} · aeration{% endif %}</div>
+      <div class="name">{{ d.stage.name }}</div>
+      <div class="tank"><div class="water" style="height: {% widthratio d.peak.volume_m3 total_volume 100 %}%"></div></div>
+      <dl>
+        <dt>tanks</dt><dd>{{ d.peak.volume_m3|num:0 }} m³</dd>
+        <dt>biofilter</dt><dd>{% if d.biofilter.feasible %}{{ d.biofilter.volume_fresh_m3|num:0 }} m³{% else %}<span style="color:var(--critical)" title="{{ d.biofilter.reason }}">not feasible</span>{% endif %}</dd>
+        <dt>flow</dt><dd>{{ d.peak.q_design_m3h|num:0 }} m³/h</dd>
+        <dt>batches</dt><dd>≤ {{ d.peak.batches }}</dd>
+        <dt>stay</dt><dd>{{ d.days_in_stage }} d</dd>
+      </dl>
+    </div>
+    {% endfor %}
+    <div class="pipe"><div class="line"></div><span class="at">{% with last=designs|last %}{{ last.stage.max_weight_g|num:0 }} g{% endwith %}</span></div>
+    <div class="node end">
+      <div class="tag">Output</div>
+      <div class="name">Harvest</div>
+      <div class="tank"></div>
+      <dl><dt>per batch</dt><dd>{% if harvests %}{{ harvests.0.biomass_t|num:1 }} t{% else %}–{% endif %}</dd>
+          <dt>per year</dt><dd>{% if res.annual_harvest_t is not None %}{{ res.annual_harvest_t|num:0 }} t{% else %}–{% endif %}</dd></dl>
+    </div>
+  </div>
+</section>
+
+{% for u in units %}
+<section class="card unit" style="--c: var(--s{{ forloop.counter }})">
+  <div class="unit-head">
+    <span class="tag">RAS {{ forloop.counter|stringformat:"02d" }}</span><h2>{{ u.stage.name }} · tanks</h2>
+    {% if not u.req.empty %}
+    <div class="facts">
+      <span>batches at once <b>{{ u.req.max_batches }}</b></span>
+      <span>one batch at peak <b>{{ u.req.batch_peak_volume_m3|num:1 }} m³</b> · <b>{{ u.req.batch_peak_biomass_kg|num:0 }} kg</b></span>
+      <span>density limit <b>{{ u.req.max_density|num:1 }} kg/m³</b></span>
+    </div>
+    {% endif %}
+  </div>
+  {% if u.req.empty %}<p class="sub">No fish pass through this unit in the plan.</p>{% else %}
+  {% with t=u.tank %}
+  <div class="tankblock">
+    <div>
+      <h3>Calculated</h3>
+      <dl class="kv">
+        <dt>Peak volume of one batch</dt><dd>{{ u.req.batch_peak_volume_m3|num:1 }} m³</dd>
+        <dt>Batches held at once</dt><dd>{{ u.req.max_batches }}</dd>
+        <dt>Peak volume, all batches</dt><dd>{{ u.req.total_peak_volume_m3|num:1 }} m³</dd>
+        {% if t.required_tank_volume %}<dt>Tank size for your steps</dt><dd class="auto">{{ t.required_tank_volume|num:2 }} m³</dd>{% endif %}
+      </dl>
+    </div>
+    <div>
+      <h3>Your tanks</h3>
+      <div class="field"><label for="t-{{ u.uid }}-item">Tank standard</label>
+        <select id="t-{{ u.uid }}-item" name="t-{{ u.uid }}-item" class="pick-item">
+          <option value="">— size from tanks per batch —</option>
+          {% for o in t.options %}<option value="{{ o.pk }}" {% if t.sel.item == o.pk|stringformat:'s' %}selected{% endif %}>{{ o.name }} · {{ o.capacity|num:1 }} m³</option>{% endfor %}
+          <option value="custom" {% if t.sel.item == 'custom' %}selected{% endif %}>Custom size…</option>
+        </select></div>
+      <div class="field"><label for="t-{{ u.uid }}-cap">Custom tank volume [m³]</label>
+        <input id="t-{{ u.uid }}-cap" type="number" step="any" min="0" name="t-{{ u.uid }}-cap" class="cap" value="{{ t.sel.capacity|default_if_none:'' }}"></div>
+      <div class="field"><label>Tanks per batch, by fish weight</label>
+        <table class="tsteps" data-unit="{{ u.index }}">
+          <tbody>
+          {% for up_to, k in t.rows %}
+            <tr><td>up to <input type="number" step="any" min="0" name="t-{{ u.uid }}-upto" value="{{ up_to|default_if_none:'' }}" placeholder="exit" aria-label="Up to weight (g)"> g</td>
+                <td><input type="number" min="1" name="t-{{ u.uid }}-k" value="{{ k }}" aria-label="Tanks"> tanks</td>
+                <td><button type="button" class="btn danger del-step" title="Remove step">✕</button></td></tr>
+          {% empty %}
+            <tr><td>up to <input type="number" step="any" min="0" name="t-{{ u.uid }}-upto" placeholder="exit" aria-label="Up to weight (g)"> g</td>
+                <td><input type="number" min="1" name="t-{{ u.uid }}-k" placeholder="{% if t.auto_steps %}{{ t.step_input.0.1 }}{% else %}e.g. 1{% endif %}" aria-label="Tanks"> tanks</td>
+                <td><button type="button" class="btn danger del-step" title="Remove step">✕</button></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <button type="button" class="btn add-step" style="margin-top:6px">+ Add grading step</button>
+        <div class="hint">E.g. up to 0.5 g → 1 tank, then (empty weight = until the fish leave this unit) → 4 tanks. Tanks are shared: a tank freed by one batch can take the next.</div></div>
+    </div>
+    <div>
+      <h3>Result</h3>
+      {% if t.steps %}
+      <table class="data stepres">
+        <thead><tr><th>Weight</th><th>Tanks</th><th>Peak m³</th><th>Size needed</th>{% if t.tank_volume %}<th>Margin</th><th></th>{% endif %}</tr></thead>
+        <tbody>{% for s in t.steps %}<tr>
+          <td>{{ s.from|num:1 }}–{% if s.up_to is not None %}{{ s.up_to|num:1 }}{% else %}exit{% endif %} g</td>
+          <td{% if t.auto_steps %} class="auto"{% endif %}>{{ s.tanks }}</td>
+          {% if s.used %}<td>{{ s.peak_volume|num:1 }}</td><td>{{ s.required_tank_volume|num:2 }} m³</td>
+            {% if t.tank_volume %}<td>{{ s.margin_pct|num:0 }} %</td><td><span class="status {% if s.ok %}ok{% else %}short{% endif %}">{% if s.ok %}OK{% else %}Too small{% endif %}</span></td>{% endif %}
+          {% else %}<td colspan="{% if t.tank_volume %}4{% else %}2{% endif %}" class="l sub">no fish in this range</td>{% endif %}
+        </tr>{% endfor %}</tbody>
+      </table>
+      <dl class="kv" style="margin-top:8px">
+        <dt>Tanks needed in unit</dt><dd><strong>{{ t.total_tanks }}</strong> (most in use on one day)</dd>
+        {% if t.tank_volume %}
+        <dt>Installed volume</dt><dd>{{ t.installed_total_m3|num:1 }} m³</dd>
+        <dt>Peak density</dt><dd>{{ t.peak_density|num:1 }} kg/m³</dd>
+        {% else %}
+        <dt>Tank size needed</dt><dd class="auto">{{ t.required_tank_volume|num:2 }} m³</dd>
+        {% endif %}
+        {% if t.cost is not None %}<dt>Cost</dt><dd>{{ t.cost|num:0 }}</dd>{% endif %}
+      </dl>
+      {% if t.auto_steps %}<p class="hint" style="color:var(--accent)">Suggested from the tank size: one step for the whole stay. Add grading steps to use fewer tanks while the fish are small.</p>{% endif %}
+      {% else %}<p class="sub">Pick a tank standard or enter tanks per batch.</p>{% endif %}
+    </div>
+  </div>
+  {% endwith %}
+  {% endif %}
+</section>
+{% endfor %}
+{% endif %}
+<section class="card section">
+  <h2>Tank turnaround</h2>
+  <div class="fgrid" style="max-width:640px">
+    <label>Empty days before a tank is restocked<input type="number" min="0" step="1" name="tank_rest_days" value="{{ settings.tank_rest_days }}">
+      <span class="help">When a batch is harvested or moved on, its tanks are emptied and cleaned. 0 = refilled the same day; e.g. 3 = kept dry for 3 days and restocked on the 4th.</span></label>
+  </div>
+</section>
+<div class="savebar">
+  <button class="btn primary" type="submit">Save units and tanks</button>
+  <span class="note" style="margin:0">Exit weights, tanks and grading are recalculated when you save.</span>
+</div>
+</form>
+
+{% if not error %}
+<section class="card section">
+  <h2>Tank occupancy</h2>
+  <p class="sub" style="margin-top:0">Tanks are shared within a unit. A batch takes free tanks when it enters or is graded into more tanks, keeps them until it moves on or is harvested, then frees them for the next batch. Water level is the batch's volume need against tank capacity at the density limit.</p>
+  <div class="occ-controls">
+    <button type="button" class="btn" id="occ-play" aria-pressed="false">Play</button>
+    <input type="range" id="occ-day" min="0" max="{{ res.horizon|add:'-1' }}" value="{{ occupancy.peak_day }}" aria-label="Plan day">
+    <span class="occ-date" id="occ-date"></span>
+  </div>
+  <div id="occ"></div>
+  <div class="occ-legend">
+    <span><span class="mini empty"></span>empty tank</span>
+    <span><span class="mini" style="--c: var(--s1)"><i style="height:60%"></i></span>in use (fill = share of capacity)</span>
+    <span><span class="mini over"><i style="height:100%"></i></span>over the density limit</span>
+  </div>
+</section>
+{{ occupancy|json_script:"occ-data" }}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// RAS rows: add / remove, refresh the weight-range column
+(function () {
+  // each RAS unit is two rows: tr.stage (main row) followed by tr.panel (constants)
+  const body = document.querySelector('#stages tbody');
+  const stages = () => [...body.querySelectorAll('tr.stage')];
+  function refresh() {
+    let prev = 0;
+    stages().forEach((tr, i) => {
+      const mx = tr.querySelector('[name=stage_max]').value;
+      tr.querySelector('.range').textContent = `${prev.toLocaleString('en-GB')} → ${mx ? Number(mx).toLocaleString('en-GB') : '?'} g`;
+      tr.querySelector('.swatch').style.background = `var(--s${Math.min(i + 1, 8)})`;
+      tr.nextElementSibling.querySelector('.panel-head strong').textContent = tr.querySelector('[name=stage_name]').value;
+      prev = Number(mx) || prev;
+    });
+  }
+  body.addEventListener('input', refresh);
+  body.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const tr = btn.closest('tr.stage');
+    if (btn.classList.contains('del') && stages().length > 1) {
+      tr.nextElementSibling.remove(); tr.remove(); refresh();
+    } else if (btn.classList.contains('toggle')) {
+      const panel = tr.nextElementSibling;
+      panel.hidden = !panel.hidden;
+      btn.classList.toggle('on', !panel.hidden);
+    }
+  });
+  document.getElementById('add').addEventListener('click', () => {
+    // a new RAS unit starts as a copy of the last unit's constants
+    const last = stages().at(-1);
+    const tr = last.cloneNode(true), panel = last.nextElementSibling.cloneNode(true);
+    tr.querySelector('[name=stage_name]').value = `RAS-${stages().length + 1}`;
+    tr.querySelector('[name=stage_id]').value = '';  // a new unit gets a new id when saved
+    tr.querySelector('[name=stage_max]').value = '';
+    panel.hidden = true;
+    body.append(tr, panel); refresh();
+    tr.querySelector('[name=stage_max]').focus();
+  });
+  refresh();
+})();
+</script>
+<script>
+// custom capacity is only editable when "Custom" is selected
+document.querySelectorAll('select.pick-item').forEach(sel => {
+  const cap = sel.closest('tr, .tankblock').querySelector(`input.cap[name="${sel.name.replace('-item', '-cap')}"]`);
+  const sync = () => { if (cap) cap.disabled = sel.value !== 'custom'; };
+  sel.addEventListener('change', sync); sync();
+});
+// grading steps: add / remove rows
+document.addEventListener('click', e => {
+  const add = e.target.closest('.add-step'), del = e.target.closest('.del-step');
+  if (add) {
+    const body = add.previousElementSibling.querySelector('tbody');
+    const row = body.rows[body.rows.length - 1].cloneNode(true);
+    row.querySelectorAll('input').forEach(i => { i.value = ''; });
+    body.appendChild(row);
+    row.querySelector('input').focus();
+  } else if (del) {
+    const body = del.closest('tbody');
+    if (body.rows.length > 1) del.closest('tr').remove();
+    else body.querySelectorAll('input').forEach(i => { i.value = ''; });
+  }
+});
+</script>
+{% if not error %}
+<script>
+(function () {
+  const O = JSON.parse(document.getElementById('occ-data').textContent);
+  const root = document.getElementById('occ'), slider = document.getElementById('occ-day');
+  const dateEl = document.getElementById('occ-date'), play = document.getElementById('occ-play');
+  const start = new Date(O.start + 'T00:00:00');
+  const fmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  // build every tank once; only fills and labels change while scrubbing
+  const cells = O.stages.map(st => {
+    const wrap = document.createElement('div');
+    wrap.className = 'occ-stage';
+    wrap.style.setProperty('--c', `var(--s${Math.min(st.index + 1, 8)})`);
+    const size = st.tank_volume.toLocaleString('en-US', { maximumFractionDigits: 1 });
+    // stage names are user input: the heading is built from text nodes, never innerHTML
+    const heading = document.createElement('h3');
+    heading.appendChild(document.createTextNode(st.name));
+    const sub = document.createElement('span');
+    sub.textContent = `${st.n_tanks} tanks of ${size} m³${st.assumed ? ' · one tank per batch shown — set tank steps above' : ''}`;
+    const count = document.createElement('span'); count.className = 'occ-count';
+    heading.append(sub, count);
+    wrap.appendChild(heading);
+    const row = document.createElement('div'); row.className = 'tankrow';
+    const tanks = [];
+    for (let t = 0; t < st.n_tanks; t++) {
+      const el = document.createElement('div'); el.className = 'tk';
+      const mini = document.createElement('span'); mini.className = 'mini empty';
+      mini.appendChild(document.createElement('i'));
+      const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = `T${t + 1}`;
+      el.append(mini, lbl);
+      row.appendChild(el); tanks.push(el);
+    }
+    wrap.appendChild(row); root.appendChild(wrap);
+    return { st, tanks, count };
+  });
+
+  function render(day) {
+    const d = new Date(start); d.setDate(d.getDate() + day);
+    dateEl.textContent = `${fmt.format(d)} · day ${day + 1}`;
+    for (const { st, tanks, count } of cells) {
+      const used = new Map();  // tank index -> {batch, fill}
+      for (const b of st.batches) {
+        const i = day - b.start;
+        if (i < 0 || i >= b.vols.length) continue;
+        const held = b.allocs.filter(([, since]) => since <= day).map(([t]) => t);
+        const fill = b.vols[i] / (b.ks[i] * st.tank_volume);
+        held.forEach(t => used.set(t, { b: b.b, fill }));
+      }
+      count.textContent = `${used.size} / ${st.n_tanks} in use`;
+      tanks.forEach((el, t) => {
+        const u = used.get(t), m = el.firstChild;
+        m.classList.toggle('empty', !u);
+        m.classList.toggle('over', !!u && u.fill > 1.0001);
+        m.firstChild.style.height = u ? `${Math.min(u.fill, 1) * 100}%` : '0';
+        el.lastChild.textContent = u ? u.b : `T${t + 1}`;
+        el.classList.toggle('busy', !!u);
+        el.title = u ? `Tank ${t + 1} · ${u.b} · ${Math.round(u.fill * 100)}% of capacity` : `Tank ${t + 1} · empty`;
+      });
+    }
+  }
+  slider.addEventListener('input', () => render(+slider.value));
+  let timer = null;
+  play.addEventListener('click', () => {
+    if (timer) { clearInterval(timer); timer = null; play.textContent = 'Play'; play.setAttribute('aria-pressed', 'false'); return; }
+    if (+slider.value >= +slider.max) slider.value = 0;
+    play.textContent = 'Pause'; play.setAttribute('aria-pressed', 'true');
+    timer = setInterval(() => {
+      if (+slider.value >= +slider.max) { play.click(); return; }
+      slider.value = +slider.value + 3; render(+slider.value);
+    }, 60);
+  });
+  render(+slider.value);
+})();
+</script>
+{% endif %}
+{% endblock %}

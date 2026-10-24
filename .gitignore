@@ -1,0 +1,24 @@
+# virtual environment
+.venv/
+
+# live database and user data (never version-control secrets or live state)
+db.sqlite3
+backups/
+cache/
+
+# python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# IDE / tooling
+.idea/
+.claude/
+.zcode/
+
+# binary twin of the tilapia reference workbook (openpyxl cannot read it)
+ptrras001_farm-design-workbook tilapia.xlsb
+
+# Excel workbooks are not published
+*.xlsx
+*.xlsb

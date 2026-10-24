@@ -1,0 +1,81 @@
+{% extends "planner/base.html" %}
+{% load fmt %}{% load static %}
+{% block title %}Biofilter · {{ scenario.name }}{% endblock %}
+{% block head %}
+<style>
+.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 2.3fr); gap: 12px; align-items: start; }
+.layout > * { min-width: 0; }
+@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+.row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.row label { color: var(--ink-2); font-size: 13px; }
+.peak { margin: 10px 0 14px; padding: 10px 12px; background: var(--wash); border-radius: var(--radius); font-size: 14px; }
+.box { position: relative; height: 240px; margin-bottom: 12px; }
+.stack { display: grid; gap: 12px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Library · Sayfa11 check</div><h1>Biofilter calculator</h1>
+  <div class="sub">{{ bp.n_tanks }} tanks × {{ bp.tank_volume_m3|num:0 }} m³ · {{ bp.daily_feed_kg|num:1 }} kg feed/day · {{ bp.temperature|num:1 }} °C · media {{ bp.media_area_m2m3|num:0 }} m²/m³</div></div></div>
+<div class="layout">
+  <form method="post" class="card">{% csrf_token %}
+    <h2>Constants</h2>
+    {% if info %}
+    <div class="peak">Linked to the simulation at <strong>{{ bp.design_weight_g|num:1 }} g</strong> (day {{ info.day }}).
+      Temperature, protein, feed and tank volume come from the simulation. Set the design weight to 0 to enter them yourself.</div>
+    {% else %}
+    <div class="peak">Peak daily feed in the simulation (whole farm): <strong>{{ peak_feed|num:1 }} kg/day</strong><br>
+      <span class="sub">Use peak feed sets daily feed to peak feed ÷ RAS units × safety factor (Excel note: real feeding increased by 1/3).</span><br>
+      <button class="btn" name="use_peak" value="1" style="margin-top:6px">Use peak feed</button></div>
+    {% endif %}
+    {% for f in form %}<div class="row"><label for="{{ f.id_for_label }}">{{ f.label }}</label><div>{{ f }}{{ f.errors }}
+      {% if f.name == "feeding_hours" %}<div class="help">Excel semantics: TAN load scales ×24/feeding_hours (8 h/day → ×3 media); the tank buffers daily peaks — keep 24 unless calibrating against Sayfa11.</div>{% endif %}</div></div>{% endfor %}
+    <button class="btn primary" type="submit" style="margin-top:12px">Recalculate</button>
+  </form>
+  <div class="stack">
+    {% if negative %}<div class="card" style="border-left:3px solid var(--critical)">Tank retention limits — hard limit: <strong>{{ max_retention|num:1 }} min</strong> · design limit ({{ bp.max_removal_pct|num:0 }} % per pass): <strong>{{ design_retention|num:0 }} min</strong>. Beyond the hard limit the flow cannot hold tank TAN at {{ bp.tan_target|num:1 }} mg/L; the design limit is what a biofilter can actually do per pass, and media volume climbs steeply as you approach it.</div>{% endif %}
+    {% for n in notes %}<div class="warn">{{ n }}</div>{% endfor %}
+    <div class="card"><h2>Total biofilter volume</h2>
+      <div class="legend"><span><i style="background:var(--s1)"></i>Saltwater</span><span><i style="background:var(--s2)"></i>Freshwater</span></div>
+      <div class="box"><canvas id="c-bio"></canvas></div>
+      <div class="note">Horizontal axis: tank retention time (min). Volume = required media volume ÷ fill ratio.</div></div>
+    <div class="card"><h2>Results by retention time</h2>
+      <div class="tablewrap"><table class="data">
+        <thead><tr><th>Retention min</th><th>Flow m³/h</th><th>Outlet TAN mg/L</th><th>Efficiency %</th><th>Rate salt g/m³/h</th><th>Rate fresh g/m³/h</th>
+          <th>Media salt m³</th><th>Media fresh m³</th><th>Biofilter salt m³</th><th>Biofilter fresh m³</th><th>Residence salt min</th><th>Residence fresh min</th></tr></thead>
+        <tbody>{% for r in rows %}{% if r.feasible %}<tr><td>{{ r.retention_min|num:0 }}</td><td>{{ r.q_tank_m3h|num:0 }}</td><td>{{ r.tan_out|num:3 }}</td><td>{{ r.efficiency_pct|num:1 }}</td>
+          <td>{{ r.rate_salt|num:2 }}</td><td>{{ r.rate_fresh|num:2 }}</td><td>{{ r.media_salt_m3|num:1 }}</td><td>{{ r.media_fresh_m3|num:1 }}</td>
+          <td>{{ r.volume_salt_m3|num:1 }}</td><td>{{ r.volume_fresh_m3|num:1 }}</td><td>{{ r.residence_salt_min|num:1 }}</td><td>{{ r.residence_fresh_min|num:1 }}</td></tr>
+          {% else %}<tr style="color:var(--critical)"><td>{{ r.retention_min|num:0 }}</td><td>{{ r.q_tank_m3h|num:0 }}</td><td colspan="10" class="l">Not feasible: {{ r.reason }}</td></tr>{% endif %}{% endfor %}</tbody>
+      </table></div>
+      <p class="note">Nitrification rate: 9.2·TAN/(TAN+0.65) × e^(0.06·(T−20)) × (media area/600); freshwater = saltwater × 1.3.{% if rows.0.media_area_capped %} Media area above 1000 m²/m³ enters this rate capped at 1000: linear scaling over-credits high-SSA carriers (cap pending a transient model).{% endif %}</p>
+    </div>
+  </div>
+</div>
+{{ chart|json_script:"bio-data" }}
+{% endblock %}
+{% block scripts %}
+<script src="{% static 'vendor/chart.umd.min.js' %}"></script>
+<script>
+const B = JSON.parse(document.getElementById('bio-data').textContent);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d = 1) => v.toLocaleString('en-US', { maximumFractionDigits: d });
+Chart.defaults.font.family = css('--mono');
+Chart.defaults.font.size = 11;
+new Chart(document.getElementById('c-bio'), {
+  type: 'line',
+  data: { labels: B.t, datasets: [
+    { label: 'Saltwater', data: B.salt, borderColor: css('--s1'), backgroundColor: css('--s1') },
+    { label: 'Freshwater', data: B.fresh, borderColor: css('--s2'), backgroundColor: css('--s2') }
+  ].map(d => ({ ...d, borderWidth: 2, pointRadius: 3, pointHoverRadius: 5 })) },
+  options: { responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false }, tooltip: {
+      backgroundColor: css('--surface'), titleColor: css('--ink'), bodyColor: css('--ink-2'),
+      borderColor: css('--axis'), borderWidth: 1, padding: 10, boxWidth: 10, boxHeight: 3,
+      callbacks: { title: i => `Retention ${i[0].label} min`, label: i => ` ${i.dataset.label}: ${fmt(i.parsed.y)} m³` } } },
+    scales: {
+      x: { type: 'linear', ticks: { color: css('--muted'), callback: v => `${v} min` }, grid: { display: false }, border: { color: css('--axis') } },
+      y: { beginAtZero: true, ticks: { color: css('--muted'), callback: v => fmt(v, 0) + ' m³' }, grid: { color: css('--grid') }, border: { display: false } } } }
+});
+</script>
+{% endblock %}

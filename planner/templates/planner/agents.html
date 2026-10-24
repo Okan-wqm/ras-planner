@@ -1,0 +1,120 @@
+{% extends "planner/base.html" %}
+{% load static %}
+{% block title %}Agents · RAS planner{% endblock %}
+{% block head %}<link rel="stylesheet" href="{% static 'planner/agents.css' %}">{% endblock %}
+{% block content %}
+<div class="card org-head">
+  <h2>Agent army — organization</h2>
+  <p class="mut">Click any agent to open its card. Edit the context directly, or tell the
+    AI assistant (<strong>✦ AI</strong>) to change it for you.</p>
+</div>
+
+<div class="org-chart">
+  {# ── orchestrator (top) ── #}
+  <div class="org-node org-root {{ orchestrator.name }}">
+    <button type="button" class="org-card" data-pk="{{ orchestrator.pk }}">
+      <span class="org-icon">🧭</span>
+      <span class="org-label">{{ orchestrator.label }}</span>
+      <span class="org-name">{{ orchestrator.name }}</span>
+    </button>
+  </div>
+
+  <div class="org-connector"></div>
+
+  {# ── specialist grid ── #}
+  <div class="org-grid">
+    {% for a in specialists %}
+    <div class="org-node {{ a.name }}{% if not a.enabled %} disabled{% endif %}">
+      <button type="button" class="org-card" data-pk="{{ a.pk }}">
+        <span class="org-icon">{% if a.name == 'brief_growth' %}🐟{% elif a.name == 'tanks_hydraulics' %}🔧{% elif a.name == 'oxygenation' %}💨{% elif a.name == 'biofilter' %}🦠{% elif a.name == 'microbial' %}🧫{% elif a.name == 'process' %}📐{% elif a.name == 'energy' %}⚡{% elif a.name == 'economist' %}💰{% elif a.name == 'proposal_writer' %}✍️{% else %}🤖{% endif %}</span>
+        <span class="org-label">{{ a.label }}</span>
+        <span class="org-name">{{ a.name }}</span>
+        {% if not a.enabled %}<span class="org-off">off</span>{% endif %}
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{# ── editor dialog (opens on card click) ── #}
+<div id="agent-editor" hidden>
+  <div class="editor-card">
+    <header>
+      <strong id="ed-label"></strong>
+      <code id="ed-name"></code>
+      <label class="ed-toggle"><input type="checkbox" id="ed-enabled"> enabled</label>
+      <button type="button" id="ed-close" title="Close">✕</button>
+    </header>
+    <textarea id="ed-role" rows="18" spellcheck="false"></textarea>
+    <footer>
+      <button type="button" id="ed-save" class="primary">Save</button>
+      <button type="button" id="ed-cancel">Cancel</button>
+      <span id="ed-status" class="mut"></span>
+    </footer>
+  </div>
+</div>
+
+<script>
+(function () {
+  var editor = document.getElementById('agent-editor'),
+      edLabel = document.getElementById('ed-label'),
+      edName = document.getElementById('ed-name'),
+      edRole = document.getElementById('ed-role'),
+      edEnabled = document.getElementById('ed-enabled'),
+      edStatus = document.getElementById('ed-status'),
+      currentPk = null;
+
+  function open(pk) {
+    currentPk = pk;
+    var card = document.querySelector('.org-card[data-pk="' + pk + '"]');
+    if (!card) return;
+    var node = card.closest('.org-node');
+    edLabel.textContent = node.querySelector('.org-label').textContent;
+    edName.textContent = node.querySelector('.org-name').textContent;
+    edEnabled.checked = !node.classList.contains('disabled');
+    edStatus.textContent = '';
+    // fetch the current role via a hidden data attribute (server-rendered)
+    edRole.value = (window.__agentRoles || {})[pk] || '';
+    editor.hidden = false;
+    edRole.focus();
+  }
+  function close() { editor.hidden = true; currentPk = null; }
+
+  document.querySelectorAll('.org-card').forEach(function (btn) {
+    btn.addEventListener('click', function () { open(btn.dataset.pk); });
+  });
+  document.getElementById('ed-close').addEventListener('click', close);
+  document.getElementById('ed-cancel').addEventListener('click', close);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !editor.hidden) close();
+  });
+
+  document.getElementById('ed-save').addEventListener('click', function () {
+    if (!currentPk) return;
+    var fd = new FormData();
+    fd.append('pk', currentPk);
+    fd.append('label', edLabel.textContent);
+    fd.append('role', edRole.value);
+    if (edEnabled.checked) fd.append('enabled', 'on');
+    fd.append('csrfmiddlewaretoken',
+      (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '');
+    edStatus.textContent = 'Saving…';
+    fetch(location.pathname, { method: 'POST', body: fd })
+      .then(function (r) { return r.ok ? '' : r.text(); })
+      .then(function () {
+        edStatus.textContent = 'Saved ✓';
+        setTimeout(function () { close(); location.reload(); }, 600);
+      })
+      .catch(function () { edStatus.textContent = 'Save failed'; });
+  });
+
+  editor.addEventListener('click', function (e) {
+    if (e.target === editor) close();  // click on the dark backdrop closes
+  });
+})();
+</script>
+
+{# role texts for the editor — rendered as a JSON blob #}
+{{ role_map|json_script:"agent-roles" }}
+<script>window.__agentRoles = JSON.parse(document.getElementById('agent-roles').textContent);</script>
+{% endblock %}

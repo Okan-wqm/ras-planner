@@ -1,0 +1,232 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}OPEX · {{ scenario.name }}{% endblock %}
+{% block head %}
+<style>
+main { padding-bottom: 90px; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; margin-bottom: 16px; }
+.grid2 > * { min-width: 0; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+table.data td { vertical-align: middle; }
+table.data input[type=number] { width: 110px; font-size: 13px; padding: 4px 7px; text-align: right; }
+table.data input.w { width: 76px; }
+table.data input.ov, table.data input:not(:placeholder-shown) { border-color: var(--accent); background: var(--accent-soft); }
+table.data input[type=text] { font-size: 13px; padding: 4px 7px; }
+td.note { text-align: left !important; font: 400 12.5px var(--body) !important; color: var(--ink-2); white-space: normal !important; max-width: 420px; }
+td.note label { display: inline-flex; align-items: center; gap: 4px; margin: 2px 8px 2px 0; color: var(--ink); }
+tr.sec td { background: var(--wash); font: 700 13px var(--display) !important; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); border-top: 2px solid var(--axis); }
+tr.sec td.gt { font: 600 14px var(--mono) !important; letter-spacing: 0; }
+tr.grp td { background: var(--surface-2); font: 600 12px var(--display) !important; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2); }
+tr.grp td.gl { text-transform: none; letter-spacing: 0; font: 400 13px var(--body) !important; }
+tr.grp td.gl label { display: inline-flex; align-items: center; gap: 6px; }
+tr.grp td.gt { font: 500 13.5px var(--mono) !important; text-transform: none; color: var(--ink); }
+td.fixed { color: var(--muted); }
+tfoot td { font-weight: 600; border-top: 1px solid var(--axis); }
+.bars { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px 12px; align-items: center; }
+.bars .lbl { color: var(--ink-2); font-size: 14px; }
+.bars .track { height: 12px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.bars .fill { display: block; height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
+.bars .val, .bars .sh { font: 500 13.5px var(--mono); text-align: right; }
+.bars .sh { color: var(--muted); font-weight: 400; }
+.tag { font: 500 11px var(--mono); padding: 2px 6px; border-radius: 3px; background: var(--surface-2); color: var(--ink-2); }
+.savebar { position: fixed; left: 232px; right: 0; bottom: 0; z-index: 5; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 12px 32px calc(12px + env(safe-area-inset-bottom, 0px)); background: var(--surface); border-top: 1px solid var(--axis); box-shadow: 0 -4px 14px #0001; }
+@media (max-width: 900px) { .savebar { left: 0; padding-inline: 16px; } }
+.savebar .total { margin-left: auto; color: var(--ink-2); }
+.savebar .total b { font: 500 18px var(--mono); color: var(--ink); }
+table.perfish tfoot tr.pos td { color: var(--good); } table.perfish tfoot tr.neg td, .kpi .v.neg { color: var(--critical); }
+table.batches tr.cur td { background: var(--accent-soft); }
+table.batches td.pos { color: var(--good); } table.batches td.neg { color: var(--critical); }
+.rev { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
+.rev label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--ink-2); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 08 / 09 · Operating cost</div><h1>OPEX</h1>
+  <div class="sub">One year = what one batch uses on its way through the farm × batches per year. Every line is quantity × unit price: the grey values are calculated, type in a field to replace one, clear it to go back.</div></div></div>
+
+{% if error %}
+<div class="card err">{{ error }} Fix the production plan first.</div>
+{% else %}
+{% if brief_batches and brief_batches|floatformat:2 != o.plan_batches_per_year|floatformat:2 and not saved_prices.batches_per_year %}<div class="warn">The brief asks for {{ brief_batches|num:1 }} batches a year, but the production plan stocks one every {{ interval }} days ({{ o.plan_batches_per_year|num:2 }} a year); OPEX uses the plan. Type the batches per year below, or change the interval on the Production plan.</div>{% endif %}
+{% if not capex_total %}<div class="warn">CAPEX is 0, so maintenance, insurance and depreciation are 0 too. Enter prices on the <a href="{% url 'capex' scenario.pk %}">CAPEX</a> page.</div>{% endif %}
+
+<div class="kpis">
+  <div class="kpi"><div class="k">OPEX per year</div><div class="v">{{ o.total|num:0 }}<span class="u">{{ currency }}</span></div></div>
+  <div class="kpi"><div class="k">Batches per year</div><div class="v">{{ o.batches_per_year|num:2 }}</div>
+    <div class="n"><label>type <input type="number" step="any" min="0" name="batches_per_year" value="{{ saved_prices|get:'batches_per_year'|plain }}" placeholder="{{ o.plan_batches_per_year|floatformat:2 }}" style="width:80px"></label> · plan: every {{ interval }} d</div></div>
+  <div class="kpi"><div class="k">Cost per batch</div><div class="v">{% if o.cost_per_batch is not None %}{{ o.cost_per_batch|num:0 }}<span class="u">{{ currency }}</span>{% else %}–{% endif %}</div>
+    <div class="n">{{ o.harvest_pcs_batch|num:0 }} fish · {{ o.harvest_kg_batch|num:0 }} kg per batch</div></div>
+  <div class="kpi"><div class="k">Harvest per year</div><div class="v">{{ o.harvest_pcs|num:0 }}<span class="u">fish</span></div>
+    <div class="n">{{ o.harvest_kg|num:0 }} kg</div></div>
+  <div class="kpi"><div class="k">Cost per {% if o.harvest_weight_g %}{{ o.harvest_weight_g|num:1 }} g {% endif %}fish</div><div class="v">{% if o.cost_per_piece is not None %}{{ o.cost_per_piece|num:3 }}<span class="u">{{ currency }}</span>{% else %}–{% endif %}</div>
+    <div class="n">{% if o.cost_per_kg is not None %}{{ o.cost_per_kg|num:2 }} {{ currency }}/kg{% endif %}{% if o.full_cost_per_piece is not None and o.depreciation %} · {{ o.full_cost_per_piece|num:3 }} with depreciation{% endif %}</div></div>
+  <div class="kpi"><div class="k">Electricity</div><div class="v">{{ o.kwh|num:0 }}<span class="u">kWh/yr</span></div></div>
+  <div class="kpi"><div class="k">Revenue</div>
+    <div class="v">{% if o.revenue is not None %}{{ o.revenue|num:0 }}<span class="u">{{ currency }}</span>{% else %}–{% endif %}</div>
+    <div class="n">{% if o.revenue is not None %}result before depreciation {{ o.ebitda|num:0 }}{% if o.payback_years %} · payback at full capacity {{ o.payback_years|num:1 }} yr{% endif %}{% else %}set a sale price below{% endif %}</div></div>
+  <div class="kpi"><div class="k">Profit per fish</div>
+    <div class="v{% if o.per_fish.margin is not None and o.per_fish.margin < 0 %} neg{% endif %}">{% if o.per_fish.margin is not None %}{{ o.per_fish.margin|num:3 }}<span class="u">{{ currency }}</span>{% else %}–{% endif %}</div>
+    <div class="n">{% if o.per_fish.price is not None %}sold at {{ o.per_fish.price|num:3 }} · {{ o.per_fish.margin_full|num:3 }} after depreciation{% else %}set a sale price below{% endif %}</div></div>
+</div>
+
+<form method="post">{% csrf_token %}
+{% if batch_rows %}
+<section class="card section">
+  <h2>Batches per year</h2>
+  <p class="sub" style="margin-top:0">The same farm with more or fewer batches a year. Feed, eggs, oxygen and the pumping days follow the batches; payroll, software, insurance and the base load stay. Quantities you typed as yearly totals stay as typed. Type the number in "Batches per year" above to use it.</p>
+  <div class="tablewrap"><table class="data batches">
+    <thead><tr><th>Batches / year</th><th>Fish / year</th><th>OPEX / year</th><th>Cost per batch</th><th>Cost per fish</th><th>with depreciation</th><th>Revenue</th><th>Profit / year</th></tr></thead>
+    <tbody>{% for r in batch_rows %}<tr{% if r.current %} class="cur"{% endif %}>
+      <td>{{ r.n|num:2 }}{% if r.current %} <span class="tag">used</span>{% endif %}</td><td>{{ r.fish|num:0 }}</td><td>{{ r.total|num:0 }}</td>
+      <td>{{ r.per_batch|num:0 }}</td><td>{{ r.per_fish|num:4 }}</td><td>{{ r.per_fish_full|num:4 }}</td>
+      <td>{% if r.revenue is not None %}{{ r.revenue|num:0 }}{% else %}–{% endif %}</td>
+      <td class="{% if r.profit is not None and r.profit < 0 %}neg{% elif r.profit is not None %}pos{% endif %}">{% if r.profit is not None %}{{ r.profit|num:0 }}{% else %}–{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="note">Same farm, different stocking density — the equipment design is not re-sized per option.</p>
+</section>
+{% endif %}
+<section class="card section">
+  <h2>First years (ramp)</h2>
+  <p class="sub" style="margin-top:0">Revenue follows the plan's real harvest dates: nothing is sold until the first batch comes out, then the farm fills up. Costs run at the full OPEX from year one. From year {{ ramped.years|length }} + 1 on, the farm is at full capacity.</p>
+  <div class="tablewrap"><table class="data">
+    <thead><tr><th>Year</th><th>Harvest t</th><th>Revenue {{ currency }}</th><th>Costs {{ currency }}</th><th>Net {{ currency }}</th><th>Cumulative {{ currency }}</th></tr></thead>
+    <tbody>{% for y in ramped.years %}<tr>
+      <td>{{ y.year }}</td><td>{{ y.harvest_t|num:1 }}</td><td>{{ y.revenue|num:0 }}</td><td>{{ y.costs|num:0 }}</td>
+      <td class="{% if y.net < 0 %}neg{% else %}pos{% endif %}">{{ y.net|num:0 }}</td>
+      <td class="{% if y.cumulative < 0 %}neg{% endif %}">{{ y.cumulative|num:0 }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="rev" style="margin-top:12px">
+    <label>Discount rate (% per year)<input type="number" step="any" min="0" name="discount_pct" value="{{ saved_prices|get:'discount_pct'|plain }}" placeholder="{{ defaults.discount_pct|plain }}"></label>
+  </div>
+  <p class="note">NPV over the plan's years at {{ ramped.discount_pct|num:1 }} %: <strong>{{ ramped.npv|num:0 }}</strong> {{ currency }} (CAPEX {{ capex_total|num:0 }} at year 0).
+  Payback at full capacity: {% if o.payback_years %}{{ o.payback_years|num:1 }} yr{% else %}–{% endif %} · payback with the ramp: {% if ramped.payback_ramped_years %}{{ ramped.payback_ramped_years|num:1 }} yr{% else %}never within 100 yr{% endif %}.</p>
+</section>
+<section class="card section">
+  <h2>Cost per year (at full capacity)</h2>
+  <div class="tablewrap"><table class="data">
+    <thead><tr><th class="l">Item</th><th class="l">How it is calculated</th><th>Quantity / year</th><th class="l">Unit</th><th>Unit price {{ currency }}</th><th>{{ currency }} / year</th></tr></thead>
+    {% for sec in sections %}
+    <tbody>
+      <tr class="sec"><td colspan="5">{{ sec.title }}</td><td class="gt">{{ sec.total|num:0 }}</td></tr>
+    </tbody>
+    {% for g in sec.groups %}
+    <tbody>
+      <tr class="grp"><td>{{ g.name }}</td>
+        <td class="gl" colspan="4">
+          {% if g.name == "Electricity" %}<label>Electricity price <input type="number" step="any" min="0" name="electricity_price" value="{{ saved_prices|get:'electricity_price'|plain }}" placeholder="{{ defaults.electricity_price|plain }}"> {{ currency }}/kWh</label>
+          {% elif g.name == "Feed" %}<span>Price per feed type; empty = <label>default <input type="number" step="any" min="0" name="feed_price" value="{{ saved_prices|get:'feed_price'|plain }}" placeholder="{{ defaults.feed_price|plain }}"> {{ currency }}/kg</label></span>
+          {% elif g.name == "Payroll" %}<span class="sub">Labour is typically 10–20% of OPEX in RAS operations — this plan: {% if payroll_share %}{{ payroll_share|num:0 }}%{% else %}–{% endif %}. The staffing defaults are placeholders pending a real staffing plan.</span>{% endif %}
+        </td><td class="gt">{{ g.total|num:0 }}</td></tr>
+      {% for ln in g.lines %}
+      <tr>
+        <td class="l">{{ ln.item }}</td>
+        <td class="note">{{ ln.note }}{% for name, value, ph, unit in ln.inputs %} <label><input class="w" type="number" step="any" min="0" name="{{ name }}" value="{{ value|plain }}" placeholder="{{ ph|plain }}">{{ unit }}</label>{% endfor %}</td>
+        <td><input type="number" step="any" min="0" name="{{ ln.qty_in.name }}" value="{{ ln.qty_in.value|plain }}" placeholder="{{ ln.qty_in.placeholder|floatformat:0 }}" aria-label="{{ ln.item }} quantity" title="Calculated: {{ ln.qty_calc|num:0 }} {{ ln.unit }}"></td>
+        <td class="l">{{ ln.unit }}</td>
+        <td><input type="number" step="any" min="0" name="{{ ln.price_in.name }}" value="{{ ln.price_in.value|plain }}" placeholder="{{ ln.price_in.placeholder|plain }}" aria-label="{{ ln.item }} unit price">{% if ln.price_in.suffix %} {{ ln.price_in.suffix }}{% endif %}</td>
+        <td>{{ ln.cost|num:0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% endfor %}
+    {% if forloop.first %}
+    <tbody id="extras">
+      <tr class="grp"><td colspan="5">Your own lines (added to their group above)</td><td class="gt"></td></tr>
+      {% for x in extras %}
+      <tr><td class="l"><input type="text" name="x_name" value="{{ x.name }}" aria-label="Item"></td>
+        <td class="note"><select name="x_group" aria-label="Group">{% for g in group_names %}<option {% if g == x.group %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></td>
+        <td><input type="number" step="any" min="0" name="x_qty" value="{{ x.qty|plain }}" aria-label="Quantity"></td>
+        <td class="l"><input type="text" name="x_unit" value="{{ x.unit }}" style="width:90px" aria-label="Unit"></td>
+        <td><input type="number" step="any" min="0" name="x_price" value="{{ x.unit_price|plain }}" aria-label="Unit price"></td>
+        <td><button type="button" class="btn danger del" title="Remove line">✕</button></td></tr>
+      {% endfor %}
+      <tr class="blank"><td class="l"><input type="text" name="x_name" placeholder="e.g. Vaccination, lab tests, bicarbonate" aria-label="Item"></td>
+        <td class="note"><select name="x_group" aria-label="Group">{% for g in group_names %}<option {% if g == "Other" %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></td>
+        <td><input type="number" step="any" min="0" name="x_qty" placeholder="1" aria-label="Quantity"></td>
+        <td class="l"><input type="text" name="x_unit" placeholder="year" style="width:90px" aria-label="Unit"></td>
+        <td><input type="number" step="any" min="0" name="x_price" aria-label="Unit price"></td>
+        <td><button type="button" class="btn danger del" title="Remove line">✕</button></td></tr>
+    </tbody>
+    {% endif %}{% endfor %}
+    <tfoot>
+      <tr><td colspan="5" class="l">Variable costs</td><td>{{ o.variable|num:0 }}</td></tr>
+      <tr><td colspan="5" class="l">Payroll</td><td>{{ o.payroll|num:0 }}</td></tr>
+      <tr><td colspan="5" class="l">Operating cost per year</td><td>{{ o.total|num:0 }}</td></tr>
+      <tr><td colspan="5" class="l">Depreciation ({{ capex_total|num:0 }} {{ currency }} CAPEX over {{ o.prices.depreciation_years|num:0 }} years)</td><td>{{ o.depreciation|num:0 }}</td></tr>
+    </tfoot>
+  </table></div>
+  <button type="button" class="btn" id="add-row" style="margin-top:10px">+ Add a line</button>
+  <p class="note">Pumping without pumps chosen in the process diagram: flow × head loss × 2.725 W per m³/h per metre ÷ pump efficiency, for the hours fish are in the unit. Once the diagram's pumps have their power set, that power is used instead.</p>
+</section>
+
+<div class="grid2">
+  <section class="card">
+    {% if o.per_fish %}
+    <h2>One {{ o.per_fish.weight_g|num:1 }} g fish</h2>
+    <table class="data perfish">
+      <thead><tr><th class="l">Cost</th><th>{{ currency }} / fish</th><th>share</th></tr></thead>
+      <tbody>
+        {% for g, v in o.per_fish.groups %}<tr><td class="l">{{ g }}</td><td>{{ v|num:4 }}</td><td>{% widthratio v o.per_fish.opex 100 %} %</td></tr>{% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><td class="l">Operating cost</td><td>{{ o.per_fish.opex|num:4 }}</td><td></td></tr>
+        <tr><td class="l">Depreciation</td><td>{{ o.per_fish.depreciation|num:4 }}</td><td></td></tr>
+        <tr><td class="l">Full cost</td><td>{{ o.per_fish.full|num:4 }}</td><td></td></tr>
+        {% if o.per_fish.price is not None %}
+        <tr><td class="l">Sale price</td><td>{{ o.per_fish.price|num:4 }}</td><td></td></tr>
+        <tr class="{% if o.per_fish.margin_full < 0 %}neg{% else %}pos{% endif %}"><td class="l">Profit per fish (after depreciation)</td><td>{{ o.per_fish.margin_full|num:4 }}</td><td>{% if o.per_fish.price %}{% widthratio o.per_fish.margin_full o.per_fish.price 100 %} %{% endif %}</td></tr>
+        {% endif %}
+      </tfoot>
+    </table>
+    {% endif %}
+    <h2 style="margin-top:18px">Revenue and depreciation</h2>
+    <div class="rev">
+      <label>Sale price per fish ({{ currency }}/piece)<input type="number" step="any" min="0" name="sale_price_piece" value="{{ saved_prices|get:'sale_price_piece'|plain }}" placeholder="0"></label>
+      <label>Sale price per kg ({{ currency }}/kg harvested)<input type="number" step="any" min="0" name="sale_price" value="{{ saved_prices|get:'sale_price'|plain }}" placeholder="0"></label>
+      <label>Depreciation period (years)<input type="number" step="any" min="0" name="depreciation_years" value="{{ saved_prices|get:'depreciation_years'|plain }}" placeholder="{{ defaults.depreciation_years|plain }}"></label>
+    </div>
+  </section>
+  <section class="card">
+    <h2>By group</h2>
+    <div class="bars">{% for g, v, w in by_group %}<span class="lbl">{{ g }}</span><span class="track"><span class="fill" style="width: {{ w|floatformat:1 }}%"></span></span><span class="val">{{ v|num:0 }}</span><span class="sh">{% if o.total %}{% widthratio v o.total 100 %} %{% endif %}</span>{% endfor %}</div>
+    <h3 style="margin-top:16px">Pumping by RAS unit</h3>
+    <table class="data">
+      <thead><tr><th>RAS unit</th><th class="l">From</th><th>m³/h</th><th>kW</th><th>kWh / year</th></tr></thead>
+      <tbody>{% for u in o.units %}<tr><td>{{ u.name }}</td><td class="l"><span class="tag">{{ u.source }}</span></td><td>{{ u.q_m3h|num:0 }}</td><td>{{ u.kw|num:1 }}</td><td>{{ u.kwh|num:0 }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </section>
+</div>
+
+<div class="savebar">
+  <button class="btn primary" type="submit">Save OPEX</button>
+  <span class="note" style="margin:0">Changes are calculated when you save.</span>
+  <span class="total">OPEX <b>{{ o.total|num:0 }} {{ currency }}</b> per year</span>
+</div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const body = document.getElementById('extras');
+  if (!body) return;
+  body.addEventListener('click', e => {
+    const del = e.target.closest('.del');
+    if (!del) return;
+    const tr = del.closest('tr');
+    if (tr.classList.contains('blank')) tr.querySelectorAll('input').forEach(i => { i.value = ''; });
+    else tr.remove();
+  });
+  document.getElementById('add-row').addEventListener('click', () => {
+    const tpl = body.querySelector('tr.blank');
+    const tr = tpl.cloneNode(true);
+    tr.classList.remove('blank');
+    tr.querySelectorAll('input').forEach(i => { i.value = ''; });
+    body.insertBefore(tr, tpl);
+    tr.querySelector('input').focus();
+  });
+})();
+</script>
+{% endblock %}

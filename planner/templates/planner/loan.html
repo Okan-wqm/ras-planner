@@ -1,0 +1,109 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Export credit{% endblock %}
+{% block head %}
+<style>
+.loan { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+@media (max-width: 1100px) { .loan { grid-template-columns: 1fr; } }
+.loan-in { position: sticky; top: 12px; }
+.loan-in fieldset { border: 0; border-top: 1px solid var(--line); margin: 0 0 var(--sp-3); padding: var(--sp-2) 0 0; }
+.loan-in legend { font: 600 10.5px var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); padding-right: 6px; }
+.loan-in .fr { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 2px 8px; align-items: center; padding: 3px 0; }
+.loan-in .fr span { font-size: 12.5px; color: var(--ink-2); }
+.loan-in .fr em { font-style: normal; color: var(--muted); font: 400 11px var(--mono); }
+.loan-in .fr input, .loan-in .fr select { padding: 4px 7px; }
+.loan-in .fr .help { grid-column: 1 / -1; font-size: 11px; color: var(--muted); margin-top: -2px; }
+.loan-in .chk { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--ink-2); padding: 4px 0; }
+.loan-in .capex { font-size: 12px; color: var(--muted); margin: 0 0 var(--sp-2); }
+.split { display: flex; height: 26px; border-radius: 4px; overflow: hidden; margin: 4px 0 6px; border: 1px solid var(--line); }
+.split span { display: flex; align-items: center; padding: 0 8px; font: 500 11px var(--mono); white-space: nowrap; overflow: hidden; color: var(--ink); }
+.split .dp { background: var(--panel-2); }
+.split .pr { background: color-mix(in srgb, var(--accent) 35%, var(--panel)); }
+.split .in { background: color-mix(in srgb, var(--warn) 30%, var(--panel)); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+table.sched td.bar { width: 34%; }
+.yb { display: flex; height: 10px; border-radius: 2px; overflow: hidden; background: var(--inset); }
+.yb .p { background: var(--accent); } .yb .i { background: var(--warn); }
+tr.grace td { color: var(--ink-2); }
+details.all summary { cursor: pointer; color: var(--ink-2); margin: var(--sp-2) 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Library · Calculator</div><h1>Export credit (Eksfin)</h1>
+  <div class="sub">What the customer borrows and pays back when the project is financed with an export credit: the down payment, the loan, the payment every {{ period_name }}, total interest and the full repayment plan. A figure to put in front of the customer; the bank and Eksfin set the actual rate, premium and terms.</div></div></div>
+
+<div class="loan">
+<form method="get" class="card loan-in">
+  {% if scenarios %}<label class="fr"><span>Scenario (for its CAPEX)</span>
+    <select name="scenario" onchange="this.form.project_total.value=''; this.form.submit()">{% for s in scenarios %}<option value="{{ s.pk }}" {% if s.pk == scenario.pk %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
+  <p class="capex">CAPEX of this scenario: {% if capex %}<b>{{ capex|num:0 }} {{ currency }}</b>{% else %}not priced yet{% endif %}</p>{% endif %}
+  {% for group, fields in groups %}
+  <fieldset><legend>{{ group }}</legend>
+    {% for f in fields %}
+    <label class="fr"><span>{{ f.label }}{% if f.unit %} <em>[{{ f.unit }}]</em>{% endif %}</span>
+      <input type="number" step="any" min="0" name="{{ f.name }}" value="{{ f.value }}"{% if f.name == 'project_total' and capex %} placeholder="{{ capex|floatformat:0 }}"{% endif %}>
+      {% if f.help %}<span class="help">{{ f.help }}</span>{% endif %}</label>
+    {% endfor %}
+    {% if group == "Loan" %}
+    <label class="fr"><span>Payments</span><select name="per_year">{% for k, label in frequencies %}<option value="{{ k }}" {% if k == per_year %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label class="fr"><span>Repayment</span><select name="method">{% for k, label in methods %}<option value="{{ k }}" {% if k == method %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    {% endif %}
+    {% if group == "Fees" %}
+    <label class="chk"><input type="checkbox" name="finance_fees" value="1" {% if finance_fees %}checked{% endif %}> Add the fees to the loan (else paid up front)</label>
+    {% endif %}
+  </fieldset>
+  {% endfor %}
+  <button class="btn primary" type="submit" style="width:100%; justify-content:center">Calculate</button>
+</form>
+
+<div>
+{% if error %}<div class="card err">{{ error }}</div>{% endif %}
+{% if r %}
+<div class="kpis">
+  <div class="kpi"><div class="k">Loan (principal)</div><div class="v">{{ r.borrowed|num:0 }}<span class="u">{{ currency }}</span></div>
+    <div class="n">{{ r.project_total|num:0 }} project − {{ r.down_payment|num:0 }} down payment{% if r.inputs.finance_fees and r.fees %} + {{ r.fees|num:0 }} fees{% endif %}</div></div>
+  <div class="kpi"><div class="k">Payment per {{ period_name }}</div><div class="v">{{ r.first_payment|num:0 }}<span class="u">{{ currency }}</span></div>
+    <div class="n">{% if r.inputs.method == 'equal_principal' %}first; falls to {{ r.last_payment|num:0 }} at the end{% else %}the same every {{ period_name }}{% endif %}{% if r.grace_payment %} · {{ r.grace_payment|num:0 }} interest only during the grace period{% endif %}</div></div>
+  <div class="kpi"><div class="k">Total interest</div><div class="v">{{ r.interest_total|num:0 }}<span class="u">{{ currency }}</span></div>
+    <div class="n">{% if r.fees %}+ {{ r.fees|num:0 }} fees = {{ r.cost_total|num:0 }} cost of credit{% else %}cost of the credit{% endif %}</div></div>
+  <div class="kpi"><div class="k">Total repaid</div><div class="v">{{ r.repaid_total|num:0 }}<span class="u">{{ currency }}</span></div>
+    <div class="n">over {{ r.months_total|num:0 }} months ({{ r.grace_periods }} grace + {{ r.periods }} instalments)</div></div>
+  <div class="kpi"><div class="k">The customer pays in all</div><div class="v">{{ r.customer_total|num:0 }}<span class="u">{{ currency }}</span></div>
+    <div class="n">down payment + loan + interest{% if r.fees %} + fees{% endif %}</div></div>
+</div>
+
+<section class="card section">
+  <h2>Where the money goes</h2>
+  <div class="split">
+    <span class="dp" style="flex: {{ r.down_payment|floatformat:0 }}" title="Down payment">down {{ r.down_payment|num:0 }}</span>
+    <span class="pr" style="flex: {{ r.borrowed|floatformat:0 }}" title="Loan principal">loan {{ r.borrowed|num:0 }}</span>
+    <span class="in" style="flex: {{ r.cost_total|floatformat:0 }}" title="Interest and fees">interest{% if r.fees %} + fees{% endif %} {{ r.cost_total|num:0 }}</span>
+  </div>
+  <div class="legend"><span><i style="background: var(--panel-2)"></i>Down payment {{ r.inputs.down_pct|num:0 }} %</span>
+    <span><i style="background: color-mix(in srgb, var(--accent) 35%, var(--panel))"></i>Loan principal</span>
+    <span><i style="background: color-mix(in srgb, var(--warn) 30%, var(--panel))"></i>Interest{% if r.fees %} and fees{% endif %}</span></div>
+</section>
+
+<section class="card section">
+  <h2>Year by year</h2>
+  <div class="tablewrap"><table class="data sched">
+    <thead><tr><th>Year</th><th>Principal</th><th>Interest</th><th>Paid in the year</th><th>Owed at year end</th><th class="l">Principal / interest</th></tr></thead>
+    <tbody>{% for y in r.years %}<tr>
+      <td>{{ y.year }}</td><td>{{ y.principal|num:0 }}</td><td>{{ y.interest|num:0 }}</td><td>{{ y.payment|num:0 }}</td><td>{{ y.balance|num:0 }}</td>
+      <td class="bar"><div class="yb"><span class="p" style="flex: {{ y.principal|floatformat:0 }}"></span><span class="i" style="flex: {{ y.interest|floatformat:0 }}"></span></div></td></tr>{% endfor %}</tbody>
+    <tfoot><tr><td>Total</td><td>{{ r.borrowed|num:0 }}</td><td>{{ r.interest_total|num:0 }}</td><td>{{ r.repaid_total|num:0 }}</td><td></td><td></td></tr></tfoot>
+  </table></div>
+  <details class="all"><summary>Every payment ({{ r.rows|length }})</summary>
+    <div class="tablewrap"><table class="data">
+      <thead><tr><th>#</th><th>Month</th><th>Principal</th><th>Interest</th><th>Payment</th><th>Owed after</th></tr></thead>
+      <tbody>{% for x in r.rows %}<tr{% if x.grace %} class="grace" title="Grace period: interest only"{% endif %}>
+        <td>{{ x.n }}</td><td>{{ x.month|num:0 }}</td><td>{{ x.principal|num:0 }}</td><td>{{ x.interest|num:0 }}</td><td>{{ x.payment|num:0 }}</td><td>{{ x.balance|num:0 }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  <p class="note">Annuity: payment = loan × r ÷ (1 − (1 + r)<sup>−n</sup>), r = annual rate ÷ payments a year, n = number of instalments. Equal principal: loan ÷ n each time plus interest on what is still owed. During the grace period only interest is paid.</p>
+</section>
+{% endif %}
+</div>
+</div>
+{% endblock %}

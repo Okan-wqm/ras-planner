@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}RAS production planner{% endblock %}</title>
+{% load static %}
+<link rel="stylesheet" href="{% static 'vendor/fonts.css' %}">
+<script>/* theme before first paint: dark unless the viewer chose light */
+try { const t = localStorage.getItem("ras-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="{% static 'planner/app.css' %}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<aside class="rail">
+  <div class="brand">RAS planner <small>Suderra</small></div>
+  {% if scenarios %}
+  <div class="pick">
+    <div class="rail-label">Project</div>
+    <select aria-label="Scenario" onchange="location.href=this.value">
+      {% for s in scenarios %}<option value="{% url 'brief' s.pk %}" {% if s.pk == scenario.pk %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select>
+    <div class="pick-acts">
+      <a href="{% url 'scenario_new' %}">+ New</a>
+      {% if scenario.pk %}<form method="post" action="{% url 'scenario_copy' scenario.pk %}">{% csrf_token %}<button type="submit">Duplicate</button></form>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  <div>
+    <div class="rail-label">Workflow</div>
+    <ol class="steps">
+      {% for st in workflow_steps %}
+      <li><a href="{{ st.url }}" class="{% if st.on %}on{% endif %}{% if not st.url %} off{% endif %}"{% if st.on %} aria-current="page"{% endif %} title="{{ st.hint }}">
+        <span class="n">{{ st.n }}</span><span>{{ st.label }}</span><i class="lamp {{ st.status }}" title="{% if st.status == 'ok' %}done{% elif st.status == 'warn' %}to check{% elif st.status == 'alarm' %}needs attention{% else %}not started{% endif %}" aria-label="{% if st.status == 'ok' %}done{% elif st.status == 'warn' %}to check{% elif st.status == 'alarm' %}needs attention{% else %}not started{% endif %}"></i></a></li>
+      {% endfor %}
+    </ol>
+  </div>
+  <div>
+    <div class="rail-label">Library</div>
+    <nav class="lib">
+      {% for it in library_links %}<a href="{{ it.url }}" class="{% if it.on %}on{% endif %}">{{ it.label }}</a>{% endfor %}
+    </nav>
+  </div>
+  <div class="rail-foot"><span>trout.xlsx basis</span>
+    <button type="button" class="theme-toggle" id="theme-toggle" title="Switch between the dark control-room view and the light view">Light</button></div>
+</aside>
+<script>
+(function () {
+  const b = document.getElementById('theme-toggle'), root = document.documentElement;
+  const sync = () => { b.textContent = root.dataset.theme === 'light' ? 'Dark' : 'Light'; };
+  sync();
+  b.addEventListener('click', () => {
+    const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+    root.dataset.theme = next;
+    try { localStorage.setItem('ras-theme', next); } catch (e) {}
+    sync();
+    location.reload();  // charts read the colours when they are drawn
+  });
+})();
+</script>
+<main>
+  {% for m in messages %}<div class="msg{% if m.level_tag == 'error' %} err{% endif %}" role="status">{{ m }}</div>{% endfor %}
+
+  {% if agent_log %}
+  <details class="agent-log">
+    <summary><strong>🤖 Agent Activity</strong> — {{ agent_log.rounds }} rounds, {{ agent_log.calls }} calls, {{ agent_log.applied|length }} actions
+    <small>({{ agent_log.when }})</small></summary>
+    <div class="agent-log-body">
+      <p class="mission"><strong>Mission:</strong> {{ agent_log.mission }}</p>
+      <p class="summary"><strong>Summary:</strong> {{ agent_log.summary }}</p>
+      {% if agent_log.applied %}
+      <div class="applied">
+        <strong>Applied actions:</strong>
+        <ul>{% for a in agent_log.applied %}<li><code>{{ a }}</code></li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      {% if agent_log.transcript %}
+      <div class="transcript">
+        <strong>Agent transcript:</strong>
+        {% for t in agent_log.transcript %}
+        <div class="tr-entry">
+          <span class="tr-agent">[{{ t.round }}] {{ t.agent }}</span>
+          {% if t.instruction %}<span class="tr-inst">← {{ t.instruction }}</span>{% endif %}
+          {% if t.applied %}<span class="tr-applied">⚙ {{ t.applied|join:", " }}</span>{% endif %}
+          <span class="tr-reply">{{ t.reply }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+  {% if step_prev or step_next %}
+  <nav class="stepnav" aria-label="Workflow">
+    {% if step_prev and step_prev.url %}<a href="{{ step_prev.url }}"><small>← Step {{ step_prev.n }}</small>{{ step_prev.label }}</a>{% endif %}
+    {% if step_next and step_next.url %}<a class="next" href="{{ step_next.url }}"><small>Step {{ step_next.n }} →</small>{{ step_next.label }}</a>{% endif %}
+  </nav>
+  {% endif %}
+</main>
+{% if ai_cfg %}{{ ai_cfg|json_script:"ai-cfg" }}{% endif %}
+<button type="button" id="ai-toggle" title="AI assistant (Alt+A)">✦ AI</button>
+<div id="ai-overlay" hidden></div>
+<section id="ai-panel" aria-label="AI assistant">
+  <header><strong>Assistant</strong><span id="ai-provider"></span>
+    <button type="button" id="ai-close" title="Close">✕</button></header>
+  <div id="ai-log" aria-live="polite"></div>
+  <div class="ai-row">
+    <div class="ai-controls">
+      <label id="ai-prov-wrap" hidden>Provider</label>
+      <label id="ai-model-wrap" hidden>Model
+        <select id="ai-model"></select></label>
+      <label id="ai-think-wrap" hidden>Effort
+        <select id="ai-thinking"></select></label>
+    </div>
+    <div class="ai-input-row">
+      <textarea id="ai-in" rows="2" placeholder="Sor… veya /görev <misyon> de, agent ordusu çalışsın (Ctrl+Enter)"></textarea>
+      <button type="button" id="ai-send">Send</button>
+    </div>
+  </div>
+</section>
+<script>
+(function () {
+  var cfgEl = document.getElementById('ai-cfg');
+  if (!cfgEl) return;
+  var cfg = JSON.parse(cfgEl.textContent);
+  var fab = document.getElementById('ai-toggle'), panel = document.getElementById('ai-panel'),
+      overlay = document.getElementById('ai-overlay'),
+      log = document.getElementById('ai-log'), input = document.getElementById('ai-in'),
+      send = document.getElementById('ai-send');
+  var provBox = document.getElementById('ai-provider-select') ||
+      (function () { var b = document.createElement('select'); b.id = 'ai-provider-select';
+        document.getElementById('ai-prov-wrap').appendChild(b); return b; })();
+  var modelBox = document.getElementById('ai-model');
+  var effBox = document.getElementById('ai-thinking');
+  var provLabel = document.getElementById('ai-provider');
+
+  function ls(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  // fill a select from [{value,label}]
+  function fill(box, items, selected) {
+    box.innerHTML = '';
+    (items || []).forEach(function (it) {
+      var o = document.createElement('option'); o.value = it.value; o.textContent = it.label;
+      box.appendChild(o);
+    });
+    if (selected) box.value = selected;
+  }
+
+  // per-provider effort options
+  var EFFORTS = {
+    zai:    [{value:'low',label:'low'},{value:'high',label:'high'},{value:'max',label:'max'}],
+    claude: [{value:'',label:'standard'},{value:'low',label:'low'},
+             {value:'medium',label:'medium'},{value:'high',label:'high'},{value:'max',label:'max'}],
+    openai: [{value:'',label:'standard'},{value:'low',label:'low'},
+             {value:'medium',label:'medium'},{value:'high',label:'high'}]
+  };
+
+  var providers = cfg.providers || [];
+  var currentProv = (function () {
+    var sp = ls('ras-ai-provider');
+    var has = providers.some(function (p) { return p.id === sp; });
+    return has ? sp : (cfg.provider_default || (providers[0] || {id:''}).id);
+  })();
+
+  function syncUI() {
+    // provider select
+    if (providers.length > 1) {
+      document.getElementById('ai-prov-wrap').hidden = false;
+      fill(provBox, providers.map(function (p) { return {value: p.id, label: p.label}; }), currentProv);
+      provLabel.textContent = (providers.find(function (p) { return p.id === currentProv; }) || {}).label || '';
+    } else if (providers.length === 1) {
+      provLabel.textContent = providers[0].label;
+    }
+
+    // model select: per-provider list from cfg
+    var models = (cfg.models || {})[currentProv] || [];
+    if (models.length > 1) {
+      document.getElementById('ai-model-wrap').hidden = false;
+      var saved = ls('ras-ai-model-' + currentProv);
+      var def = (cfg.model_defaults || {})[currentProv] || models[0].value;
+      fill(modelBox, models, (models.some(function (m) { return m.value === saved; }) ? saved : def));
+      modelBox.addEventListener('change', function () {
+        lsSet('ras-ai-model-' + currentProv, modelBox.value);
+      });
+    } else {
+      document.getElementById('ai-model-wrap').hidden = true;
+    }
+
+    // effort select: per-provider options
+    var efforts = EFFORTS[currentProv] || [];
+    if (efforts.length > 0) {
+      document.getElementById('ai-think-wrap').hidden = false;
+      var savedE = ls('ras-ai-effort-' + currentProv);
+      var defE = currentProv === 'zai' ? 'low' : '';
+      fill(effBox, efforts, (efforts.some(function (e) { return e.value === savedE; }) ? savedE : defE));
+      effBox.addEventListener('change', function () {
+        lsSet('ras-ai-effort-' + currentProv, effBox.value);
+      });
+    } else {
+      document.getElementById('ai-think-wrap').hidden = true;
+    }
+  }
+
+  provBox.addEventListener('change', function () {
+    currentProv = provBox.value;
+    lsSet('ras-ai-provider', currentProv);
+    provLabel.textContent = (providers.find(function (p) { return p.id === currentProv; }) || {}).label || '';
+    syncUI();
+  });
+
+  syncUI();
+
+  function currentPick() {
+    return {
+      provider: providers.length > 1 ? provBox.value : currentProv,
+      model: !document.getElementById('ai-model-wrap').hidden ? modelBox.value : '',
+      thinking: !document.getElementById('ai-think-wrap').hidden ? effBox.value : ''
+    };
+  }
+
+  var history = [];
+  function bubble(role, text) {
+    var d = document.createElement('div'); d.className = 'ai-b ' + role;
+    d.appendChild(document.createTextNode(text)); log.appendChild(d); log.scrollTop = log.scrollHeight;
+  }
+  function persist() {
+    var store = [].slice.call(log.children).map(function (el) {
+      return { role: el.className.replace('ai-b ', ''), text: el.textContent };
+    });
+    try { sessionStorage.setItem('ras-ai-log', JSON.stringify(store.slice(-40))); } catch (e) {}
+  }
+  function restore() {
+    var raw; try { raw = sessionStorage.getItem('ras-ai-log'); } catch (e) { return; }
+    if (!raw) return;
+    JSON.parse(raw || '[]').forEach(function (m) {
+      bubble(m.role, m.text);
+      if (m.role === 'user') history.push({ role: 'user', content: m.text });
+      if (m.role === 'bot') history.push({ role: 'assistant', content: m.text });
+    });
+    history = history.slice(-10);
+  }
+  restore();
+  var isOpen = false;
+  function open(v) {
+    isOpen = v;
+    if (v) {
+      overlay.hidden = false;
+      panel.classList.add('open');
+      fab.classList.add('active');
+      input.focus();
+    } else {
+      overlay.hidden = true;
+      panel.classList.remove('open');
+      fab.classList.remove('active');
+      persist();
+    }
+  }
+  fab.addEventListener('click', function () { open(!isOpen); });
+  overlay.addEventListener('click', function () { open(false); });
+  document.getElementById('ai-close').addEventListener('click', function () { open(false); });
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && (e.key === 'a' || e.key === 'A')) { open(!isOpen); e.preventDefault(); }
+    if (e.key === 'Escape' && isOpen) { open(false); }
+  });
+  function token() {
+    var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    if (m) return m[1];
+    var f = document.querySelector('input[name=csrfmiddlewaretoken]');
+    return f ? f.value : '';
+  }
+  var tick = null;
+  function busy(v) {
+    send.disabled = v;
+    if (tick) { clearInterval(tick); tick = null; }
+    if (v) {
+      var t0 = Date.now();
+      tick = setInterval(function () { send.textContent = '… ' + Math.round((Date.now() - t0) / 1000) + 's'; }, 500);
+    } else { send.textContent = 'Send'; }
+  }
+  function submit() {
+    var text = input.value.trim();
+    if (!text || send.disabled) return;
+    var lower = text.toLowerCase();
+    var isMission = lower.indexOf('/görev') === 0 || lower.indexOf('/gorev') === 0 || lower.indexOf('/mission') === 0;
+    bubble('user', text); history.push({ role: 'user', content: text }); input.value = ''; busy(true); persist();
+    var pick = currentPick();
+    var payload = isMission
+      ? { mission: text.replace(/^\/[^ ]+\s*/, ''), thinking: pick.thinking,
+          provider: pick.provider, model: pick.model }
+      : { message: text, history: history.slice(0, -1), path: location.pathname,
+          thinking: pick.thinking, provider: pick.provider, model: pick.model };
+    fetch(isMission ? cfg.mission : cfg.url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token() },
+      body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { bubble('err', d.error || 'AI error'); return; }
+        if (isMission) {
+          (d.transcript || []).forEach(function (t) {
+            bubble('bot', '🧠 ' + t.agent + (t.instruction ? ' → ' + t.instruction : '') + '\n' +
+                           (t.applied && t.applied.length ? '⚙ ' + t.applied.join('\n⚙ ') + '\n' : '') +
+                           t.reply);
+          });
+          bubble('bot', '📋 ' + (d.summary || ''));
+          if (d.failed && d.failed.length) bubble('err', 'Uygulanamayanlar:\n' + d.failed.join('\n'));
+        } else {
+          bubble('bot', d.text || '(boş yanıt)'); history.push({ role: 'assistant', content: d.text || '' });
+          if (d.applied && d.applied.length) {
+            bubble('act', '⚙ Uygulandı:\n' + d.applied.join('\n'));
+          } else if (d.failed && d.failed.length) {
+            bubble('err', 'Uygulanamayanlar:\n' + d.failed.join('\n'));
+          }
+        }
+        if (d.applied && d.applied.length) {
+          bubble('act', 'Sayfa yenileniyor…'); persist();
+          var url = d.redirect_url || location.href;
+          setTimeout(function () { location.href = url; }, 1600);
+        }
+      })
+      .catch(function () { bubble('err', 'Could not reach the assistant.'); })
+      .finally(function () { history = history.slice(-10); busy(false); persist(); });
+  }
+  send.addEventListener('click', submit);
+  input.addEventListener('keydown', function (e) { if (e.ctrlKey && e.key === 'Enter') submit(); });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

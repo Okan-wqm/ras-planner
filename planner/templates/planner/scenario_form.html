@@ -1,0 +1,49 @@
+{% extends "planner/base.html" %}
+{% block title %}Constants · {{ scenario.name }}{% endblock %}
+{% block head %}
+<style>
+.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px; align-items: center; padding: 5px 0;
+  border-bottom: 1px solid var(--grid); }
+.row:last-child { border-bottom: 0; }
+.row label { color: var(--ink-2); font-size: 13px; }
+.meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; align-items: end; margin-bottom: 12px; }
+.meta label { display: block; color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
+.help { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.bar { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Library · All assumptions</div><h1>{% if scenario.pk %}All assumptions: {{ scenario.name }}{% else %}New scenario{% endif %}</h1><div class="sub">Every constant of the scenario in one place. Each also appears on the workflow step it belongs to; RAS units can override them on step 03.</div></div></div>
+<form method="post">{% csrf_token %}
+  {{ meta.non_field_errors }}{{ params.non_field_errors }}
+  <div class="card meta">
+    <div><label for="{{ meta.name.id_for_label }}">{{ meta.name.label }}</label>{{ meta.name }}{{ meta.name.errors }}</div>
+    <div><label for="{{ meta.temperature_steps.id_for_label }}">{{ meta.temperature_steps.label }}</label>{{ meta.temperature_steps }}
+      <div class="help">{{ meta.temperature_steps.help_text }}</div>{{ meta.temperature_steps.errors }}</div>
+    <div><label>{{ meta.use_feed_catalog }} {{ meta.use_feed_catalog.label }}</label>
+      <div class="help">When off, the default FCR and protein in the Feed group are used.</div></div>
+  </div>
+  <div class="groups">
+    {% for group, items in params.grouped %}
+    <div class="card"><h2>{{ group }}</h2>
+      {% if group == "Growth" and tgc_warn %}<div class="warn" style="margin:0 0 10px">TGC 2.5 reaches harvest ~30% faster than the trout workbook's implied ~1.65 (728-day) curve — verify for your species.</div>{% endif %}
+      {% for f in items %}
+      <div class="row"><label for="{{ f.id_for_label }}">{{ f.label }}</label><div>{{ f }}{{ f.errors }}</div></div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="bar">
+    <button class="btn primary" type="submit">Save and recalculate</button>
+    {% if scenario.pk %}<a class="btn" href="{% url 'dashboard' scenario.pk %}">Cancel</a>{% endif %}
+  </div>
+</form>
+{% if scenario.pk %}
+<form method="post" action="{% url 'scenario_delete' scenario.pk %}" style="margin-top:24px"
+      onsubmit="return this.querySelector('input').checked">{% csrf_token %}
+  <label class="sub"><input type="checkbox"> I want to delete this scenario</label>
+  <button class="btn danger" type="submit">Delete scenario</button>
+</form>
+{% endif %}
+{% endblock %}

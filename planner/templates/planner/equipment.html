@@ -1,0 +1,188 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Equipment · {{ scenario.name }}{% endblock %}
+{% block head %}
+<style>
+.unit { margin-bottom: 16px; border-top: 3px solid var(--c); }
+.unit-head { display: flex; flex-wrap: wrap; gap: 6px 24px; align-items: baseline; margin-bottom: 14px; }
+.unit-head h2 { margin: 0; }
+.unit-head .tag { font: 500 12px var(--mono); letter-spacing: 0.08em; color: var(--muted); }
+.unit-head .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-left: auto; color: var(--ink-2); font-size: 14px; }
+.unit-head .facts b { font: 500 13.5px var(--mono); color: var(--ink); }
+
+.tankblock { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 0;
+  border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; }
+@media (max-width: 1100px) { .tankblock { grid-template-columns: 1fr; } }
+.tankblock > div { padding: 12px 16px; border-right: 1px solid var(--border); }
+.tankblock > div:last-child { border-right: 0; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 0 14px; margin: 0; }
+.kv dt, .kv dd { padding: 5px 0; border-bottom: 1px solid var(--grid); }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; text-align: right; font: 400 13.5px var(--mono); }
+.kv dd.auto { color: var(--accent); }
+.field { margin-bottom: 9px; } .field label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 3px; }
+.field .hint { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.field select { width: 100%; }
+
+table.steps { border-collapse: collapse; }
+table.steps td { padding: 2px 8px 2px 0; white-space: nowrap; color: var(--ink-2); font-size: 13px; }
+table.steps input { width: 74px; }
+table.stepres th, table.stepres td { padding: 5px 6px; }
+table.stepres td.auto, .kv dd.auto { color: var(--accent); }
+.tankblock .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+table.equip td { vertical-align: middle; }
+table.equip select { min-width: 190px; }
+table.equip input { width: 100px; }
+table.equip td.auto { color: var(--accent); }
+.status { display: inline-block; font: 600 11px/1 var(--display); letter-spacing: 0.1em; text-transform: uppercase;
+  padding: 4px 7px; border-radius: 4px; border: 1px solid currentColor; }
+.status.ok { color: var(--good); } .status.short { color: var(--critical); } .status.none { color: var(--muted); border-style: dashed; }
+table.dgm td .tags { font-size: 12px; color: var(--muted); margin-top: 2px; }
+details.planchk { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 10px; }
+details.planchk > summary { cursor: pointer; color: var(--ink-2); font-size: 13.5px; margin-bottom: 10px; }
+.subtotal { text-align: right; margin-top: 10px; color: var(--ink-2); }
+.subtotal b { font: 500 15px var(--mono); color: var(--ink); }
+.savebar { position: sticky; bottom: 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 12px 16px; margin: 0 0 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.savebar .total { margin-left: auto; color: var(--ink-2); }
+.savebar .total b { font: 500 18px var(--mono); color: var(--ink); }
+
+/* ---------- tank occupancy ---------- */
+.occ-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 14px; }
+.occ-controls input[type=range] { flex: 1 1 320px; accent-color: var(--accent); }
+.occ-date { font: 500 16px var(--mono); min-width: 13ch; }
+.occ-stage { margin-bottom: 18px; }
+.occ-stage h3 { display: flex; gap: 12px; align-items: baseline; }
+.occ-stage h3 span { font: 400 12px var(--mono); letter-spacing: 0; text-transform: none; color: var(--muted); }
+.occ-stage h3 .occ-count { margin-left: auto; color: var(--ink); }
+.tankrow { display: flex; flex-wrap: wrap; gap: 8px 6px; }
+.tk { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 40px; }
+.tk .lbl { font: 400 10px var(--mono); color: var(--muted); }
+.tk.busy .lbl { color: var(--ink); }
+.tk .mini { width: 30px; height: 34px; }
+.mini { position: relative; width: 22px; height: 26px; border: 1.5px solid var(--ink-2); border-top: 0; border-radius: 0 0 5px 5px;
+  background: var(--surface); overflow: hidden; }
+.mini.empty { border-style: dashed; border-color: var(--axis); }
+.mini i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--c); }
+.mini.over { border-color: var(--critical); }
+.mini.over i { background: var(--critical); }
+.occ-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); }
+.occ-legend .mini { display: inline-block; vertical-align: middle; margin-right: 6px; width: 16px; height: 18px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 06 / 09 · Equipment</div><h1>Equipment</h1>
+  <div class="sub">Calculated requirements per RAS unit next to the equipment you pick. Choose an industry standard from your <a href="{% url 'standards' %}">Standards</a> list or enter a custom capacity; quantities are suggested until you type your own.</div></div></div>
+
+{% if error %}
+<div class="card err">{{ error }} Fix the production plan first.</div>
+{% else %}
+<form method="post">{% csrf_token %}
+<input type="hidden" name="n_stages" value="{{ units|length }}">
+
+{% for u in units %}
+<section class="card unit" style="--c: var(--s{{ forloop.counter }})">
+  <div class="unit-head">
+    <span class="tag">RAS {{ forloop.counter|stringformat:"02d" }}</span><h2>{{ u.stage.name }}</h2>
+    {% if not u.req.empty %}
+    <div class="facts">
+      <span>batches at once <b>{{ u.req.max_batches }}</b></span>
+      <span>one batch at peak <b>{{ u.req.batch_peak_volume_m3|num:1 }} m³</b> · <b>{{ u.req.batch_peak_biomass_kg|num:0 }} kg</b></span>
+      <span>density limit <b>{{ u.req.max_density|num:1 }} kg/m³</b></span>
+      <span class="status {% if u.req.source == 'diagram' %}ok{% else %}none{% endif %}" title="{% if u.req.source == 'diagram' %}Flows, oxygen, ozone and media are what the process diagram sends through each kind of equipment{% else %}No solvable process diagram yet: the plan's peak (× peak factor) is used{% endif %}">{% if u.req.source == 'diagram' %}from the process diagram{% else %}plan estimate{% endif %}</span>
+    </div>
+    {% endif %}
+  </div>
+  {% if u.req.empty and not u.has_diagram %}<p class="sub">No fish pass through this unit in the plan.</p>{% else %}
+  {% if u.has_diagram %}
+  <h3 style="margin-top:0">Installed — from the process diagram</h3>
+  <div class="tablewrap"><table class="data equip dgm">
+    <thead><tr><th>Equipment</th><th class="l">Size</th><th>Qty</th><th class="l">Standard</th><th>Unit price</th><th>Total</th></tr></thead>
+    <tbody>
+    {% for ln in u.diagram_lines %}{% with p="d"|add:u.index_s|add:"-"|add:ln.gkey %}
+      <tr>
+        <td>{{ ln.category }}{% if ln.tags %}<div class="tags">{{ ln.tags }}</div>{% endif %}</td>
+        <td class="l">{{ ln.size|default:"—" }}</td>
+        <td><b>{{ ln.qty }}</b></td>
+        <td class="l"><input type="hidden" name="{{ p }}-nodes" value="{{ ln.node_ids|join:',' }}">
+          <select name="{{ p }}-std" aria-label="{{ ln.category }} standard"><option value="">— none —</option>
+          {% for o in ln.options %}<option value="{{ o.pk }}" {% if ln.std.pk == o.pk %}selected{% endif %}>{{ o.name }}{% if o.unit_price is not None %} · {{ o.unit_price|num:0 }}{% endif %}</option>{% endfor %}
+          </select></td>
+        <td><input type="number" step="any" min="0" name="{{ p }}-price" value="{{ ln.own_price|default_if_none:'' }}" placeholder="{% if ln.std and ln.std.unit_price is not None %}{{ ln.std.unit_price|num:0 }}{% endif %}" aria-label="{{ ln.category }} unit price"></td>
+        <td>{% if ln.total is not None %}{{ ln.total|num:0 }}{% else %}<span style="color:var(--warn)">no price</span>{% endif %}</td>
+      </tr>
+    {% endwith %}{% endfor %}
+    </tbody>
+  </table></div>
+  <div class="subtotal">Unit equipment cost <b>{{ u.diagram_total|num:0 }}</b></div>
+  <p class="note">Identical items drawn in the diagram are one line with their count; adding or deleting an item there changes this list. A standard or price chosen here is written to those items in the diagram. <a href="{% url 'process' scenario.pk %}?ras={{ u.index }}">Open the diagram</a></p>
+  <details class="planchk"><summary>Plan estimate check — sized equipment for the plan's peak (not used for CAPEX while a diagram exists)</summary>
+  {% endif %}
+  <p class="note" style="margin-top:0">Tanks: {% if u.tank.total_tanks %}{{ u.tank.total_tanks }} × {{ u.tank.tank_volume|default:u.tank.required_tank_volume|num:1 }} m³{% else %}not chosen yet{% endif %} — <a href="{% url 'units' scenario.pk %}">set on step 03 Units &amp; tanks</a>.</p>
+
+  <div class="tablewrap"><table class="data equip">
+    <thead><tr><th>Equipment</th><th>Required</th><th class="l">Standard</th><th>Custom capacity</th><th>Qty</th><th>Installed</th><th>Margin</th><th>Status</th><th>Cost</th></tr></thead>
+    <tbody>
+    {% for r in u.rows %}
+      <tr>
+        <td>{{ r.label }}{% if r.key == 'biofilter' or r.key == 'biomedia' %} <span class="sub">({{ water }}water)</span>{% endif %}</td>
+        <td>{% if r.required is None %}<span style="color:var(--critical)">flow too low</span>{% elif r.not_needed %}–{% else %}{{ r.required|num:1 }} {{ r.unit }}{% endif %}</td>
+        <td class="l"><select name="s{{ u.index }}-{{ r.key }}-item" class="pick-item" aria-label="{{ r.label }} standard">
+          <option value="">— none —</option>
+          {% for o in r.options %}<option value="{{ o.pk }}" {% if r.sel.item == o.pk|stringformat:'s' %}selected{% endif %}>{{ o.name }} · {{ o.capacity|num:1 }} {{ r.unit }}</option>{% endfor %}
+          <option value="custom" {% if r.sel.item == 'custom' %}selected{% endif %}>Custom…</option>
+        </select></td>
+        <td><input type="number" step="any" min="0" class="cap" name="s{{ u.index }}-{{ r.key }}-cap" value="{{ r.sel.capacity|default_if_none:'' }}" aria-label="{{ r.label }} capacity"></td>
+        <td><input type="number" min="1" name="s{{ u.index }}-{{ r.key }}-qty" value="{{ r.sel.qty|default_if_none:'' }}" placeholder="{% if r.auto_qty %}{{ r.qty }}{% endif %}" aria-label="{{ r.label }} quantity"></td>
+        <td>{% if r.installed %}{{ r.installed|num:1 }} {{ r.unit }}{% else %}–{% endif %}</td>
+        <td>{% if r.margin_pct is not None %}{{ r.margin_pct|num:0 }} %{% else %}–{% endif %}</td>
+        <td>{% if r.not_needed %}<span class="status none">Not needed</span>{% elif r.ok is None %}<span class="status none">Not set</span>{% elif r.ok %}<span class="status ok">OK</span>{% else %}<span class="status short">Short</span>{% endif %}</td>
+        <td>{% if r.cost is not None %}{{ r.cost|num:0 }}{% else %}–{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if u.has_diagram %}</details>{% else %}
+  {% if u.priced %}<div class="subtotal">Unit equipment cost <b>{{ u.cost|num:0 }}</b></div>{% endif %}
+  <p class="note">No process diagram for this unit yet; CAPEX uses the selections above. Items you draw in the diagram replace them here. <a href="{% url 'process' scenario.pk %}?ras={{ u.index }}">Draw the process</a></p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endfor %}
+
+<div class="savebar">
+  <label>Biofilter basis
+    <select name="water"><option value="fresh" {% if water == 'fresh' %}selected{% endif %}>Freshwater</option><option value="salt" {% if water == 'salt' %}selected{% endif %}>Saltwater</option></select></label>
+  <button class="btn primary" type="submit">Save and check</button>
+  {% if any_price %}<span class="total">Equipment total <b>{{ grand_total|num:0 }}</b></span>{% endif %}
+</div>
+</form>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// custom capacity is only editable when "Custom" is selected
+document.querySelectorAll('select.pick-item').forEach(sel => {
+  const cap = sel.closest('tr, .tankblock').querySelector(`input.cap[name="${sel.name.replace('-item', '-cap')}"]`);
+  const sync = () => { if (cap) cap.disabled = sel.value !== 'custom'; };
+  sel.addEventListener('change', sync); sync();
+});
+// grading steps: add / remove rows
+document.addEventListener('click', e => {
+  const add = e.target.closest('.add-step'), del = e.target.closest('.del-step');
+  if (add) {
+    const body = add.previousElementSibling.querySelector('tbody');
+    const row = body.rows[body.rows.length - 1].cloneNode(true);
+    row.querySelectorAll('input').forEach(i => { i.value = ''; });
+    body.appendChild(row);
+    row.querySelector('input').focus();
+  } else if (del) {
+    const body = del.closest('tbody');
+    if (body.rows.length > 1) del.closest('tr').remove();
+    else body.querySelectorAll('input').forEach(i => { i.value = ''; });
+  }
+});
+</script>
+{% endblock %}

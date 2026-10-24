@@ -1,0 +1,31 @@
+{% extends "planner/base.html" %}
+{% block title %}Proposals{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 09 / 09 · {{ company.name }}</div><h1>Proposals</h1>
+  <div class="sub">A proposal takes its sizing, production plan, process drawings, CAPEX and OPEX from a scenario, and its texts from the standard proposal; edit any of them, then download the PDF.</div></div>
+  <div class="actions">
+    <form method="post">{% csrf_token %}
+      <select name="scenario" aria-label="Scenario">{% for s in scenarios %}<option value="{{ s.pk }}">{{ s.name }}</option>{% endfor %}</select>
+      <button class="btn primary" type="submit">+ New proposal</button>
+    </form>
+  </div>
+</div>
+{% if not company.address and not company.email %}
+<div class="warn">Fill in the <a href="{% url 'company' %}">company profile</a> (address, contact, logo) — it goes on every proposal's cover.</div>
+{% endif %}
+<section class="card">
+  <div class="tablewrap"><table class="data">
+    <thead><tr><th>No.</th><th class="l">Project</th><th class="l">Customer</th><th class="l">Scenario</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+    {% for p in proposals %}
+      <tr><td class="mono">{{ p.number }}</td><td class="l"><a href="{% url 'proposal_edit' p.pk %}">{{ p.title }}</a></td>
+        <td class="l">{{ p.customer_name|default:"–" }}</td><td class="l">{{ p.scenario.name|default:"–" }}</td><td>{{ p.date|date:"Y-m-d" }}</td>
+        <td><a class="btn" href="{% url 'proposal_pdf' p.pk %}">PDF</a>
+          <form method="post" action="{% url 'proposal_copy' p.pk %}" style="display:inline">{% csrf_token %}<button class="btn" type="submit">Duplicate</button></form></td></tr>
+    {% empty %}
+      <tr><td colspan="6" class="l sub">No proposals yet. Pick a scenario above and create one.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

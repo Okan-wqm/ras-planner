@@ -1,0 +1,216 @@
+{% extends "planner/base.html" %}
+{% load fmt %}{% load static %}
+{% block title %}Production plan · {{ scenario.name }}{% endblock %}
+{% block head %}
+<style>
+.setup { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2.4fr); gap: 24px; }
+.setup > * { min-width: 0; }
+@media (max-width: 1000px) { .setup { grid-template-columns: 1fr; } }
+.f { margin-bottom: 10px; } .f label { display: block; color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
+.help { color: var(--muted); font-size: 12px; margin-top: 3px; }
+table.stages { width: 100%; border-collapse: collapse; }
+table.stages th { text-align: left; color: var(--ink-2); font-size: 12px; font-weight: 600; padding: 4px 6px; }
+table.stages td { padding: 4px 6px; }
+table.stages td.range { color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kpis { margin-top: 16px; }
+.horizon { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+table.design { width: auto; min-width: min(100%, 560px); }
+table.design th:not(:first-child), table.design td:not(:first-child) { min-width: 190px; }
+table.design td:first-child { color: var(--ink-2); padding-right: 32px; }
+table.design tr.group td { font: 600 12px/1.2 var(--display); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent); background: var(--surface-2); text-align: left; padding-top: 10px; }
+table.design .bad { color: var(--critical); }
+table.design td strong { font-weight: 500; color: var(--ink); }
+.legend i.bar { height: 10px; border-radius: 3px; }
+.gantt-box { position: relative; }
+.harvests { max-height: 420px; overflow: auto; }
+
+/* ---------- process train: RAS units as tanks on a pipe ---------- */
+.train { display: flex; align-items: stretch; overflow-x: auto; padding: 6px 2px 4px; }
+.node { flex: 1 0 170px; display: flex; flex-direction: column; align-items: center; text-align: center; min-width: 170px; }
+.node .tag { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+.node .name { font: 600 17px/1.15 var(--display); margin: 4px 0 10px; }
+.tank { position: relative; width: 104px; height: 78px; border: 2px solid var(--ink-2); border-top-width: 0;
+  border-radius: 0 0 14px 14px; background: var(--surface); overflow: hidden; }
+.tank::before { content: ""; position: absolute; left: -2px; right: -2px; top: 0; border-top: 2px dashed var(--axis); }
+.tank .water { position: absolute; left: 0; right: 0; bottom: 0; background: var(--c); opacity: 0.85; }
+.tank .water::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--c); filter: brightness(1.25); }
+.node.end .tank { border-style: dashed; border-color: var(--axis); }
+.node dl { display: grid; grid-template-columns: auto auto; justify-content: center; gap: 2px 10px; margin: 12px 0 0; font-size: 13px; }
+.node dt { color: var(--muted); text-align: right; }
+.node dd { margin: 0; text-align: left; font: 500 13px var(--mono); }
+.pipe { flex: 0 0 96px; display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding-top: 66px; }
+.pipe .line { width: 100%; height: 6px; background: var(--axis); border-radius: 3px; position: relative; }
+.pipe .line::after { content: ""; position: absolute; right: -2px; top: -5px; border-left: 10px solid var(--axis);
+  border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
+.pipe .at { font: 500 12px var(--mono); color: var(--ink); background: var(--page); padding: 2px 6px; border-radius: 4px; margin-top: 8px; border: 1px solid var(--border); }
+.train-note { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+td.acts { white-space: nowrap; }
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: 11px; line-height: 18px; text-align: center; }
+tr.panel > td { background: var(--surface-2); border-radius: 8px; padding: 12px 14px; }
+.panel-head { color: var(--ink-2); font-size: 13px; margin-bottom: 10px; }
+.pgroups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 8px 20px; }
+.pgroup h3 { margin: 6px 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.btn.toggle.on { background: var(--surface-2); border-color: var(--accent); }
+.prow { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px; align-items: center; padding: 3px 6px; border-left: 3px solid transparent; font-size: 12px; color: var(--ink-2); }
+.prow em { color: var(--muted); font-style: normal; }
+.prow.changed { border-left-color: var(--accent); background: var(--surface); color: var(--ink); font-weight: 600; }
+.prow input, .prow select { padding: 4px 6px; width: 100%; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 02 / 09 · Production plan</div><h1>Production plan</h1>
+  <div class="sub">Batches are stocked at a fixed interval and move from one RAS unit to the next by weight. Each unit's tanks and biofilter are sized for the peak load of all batches it holds at the same time.</div></div></div>
+
+<form method="post" class="card section">{% csrf_token %}
+  <div class="setup">
+    <div>
+      <h2>Stocking</h2>
+      <div class="f"><label for="sd">First stocking date</label><input id="sd" type="date" name="start_date" value="{{ settings.start_date }}"></div>
+      <div class="f"><label for="iv">Stocking interval [days]</label><input id="iv" type="number" min="1" name="interval_days" value="{{ settings.interval_days }}">
+        <div class="help">E.g. 30 for monthly egg intake, 40 for every 40 days.</div></div>
+      <div class="f"><label for="hz">Planning horizon</label>
+        <div class="horizon"><input id="hz" type="number" min="1" step="any" name="horizon_value" value="{{ settings.horizon_value }}">
+          <select name="horizon_unit" aria-label="Horizon unit">
+            <option value="days" {% if settings.horizon_unit == 'days' %}selected{% endif %}>days</option>
+            <option value="weeks" {% if settings.horizon_unit == 'weeks' %}selected{% endif %}>weeks</option>
+            <option value="months" {% if settings.horizon_unit == 'months' %}selected{% endif %}>months</option>
+            <option value="years" {% if settings.horizon_unit == 'years' %}selected{% endif %}>years</option>
+          </select></div>
+        <div class="help">Currently {{ settings.horizon_days }} days. Anything from 30 days up to 3 years; for the steady state use harvest age plus a year.</div></div>
+      <div class="help">Fish stocked per batch: {{ fish_per_batch|num:0 }} — set from the target on <a href="{% url 'brief' scenario.pk %}">step 01 Brief</a>.</div>
+    </div>
+    <div>
+      <h2>RAS units</h2>
+      <p class="sub" style="margin-top:0">Fish pass through {{ panels|length }} RAS unit{{ panels|length|pluralize }}:
+        {% for pn in panels %}<span class="swatch" style="background:var(--s{{ forloop.counter }})"></span>{{ pn.stage.name }} (to {{ pn.stage.max_weight_g|stringformat:'g' }} g){% if not forloop.last %} → {% endif %}{% endfor %}.</p>
+      <p><a class="btn" href="{% url 'units' scenario.pk %}">Edit RAS units and tanks →</a></p>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+        <button type="submit" class="btn primary">Save and recalculate</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if error %}
+<div class="card err">{{ error }} Lower the harvest weight or check the growth constants.</div>
+{% else %}
+
+
+<div class="kpis">
+  <div class="kpi"><div class="k">Harvest age</div><div class="v">{{ res.harvest_age }}<span class="u">days</span></div><div class="n">stocking to harvest</div></div>
+  <div class="kpi"><div class="k">Batches stocked</div><div class="v">{{ res.batches|length }}</div><div class="n">one every {{ plan.interval_days }} days</div></div>
+  <div class="kpi"><div class="k">Batches harvested</div><div class="v">{{ harvests|length }}</div><div class="n">within the {{ res.horizon }}-day plan</div></div>
+  <div class="kpi"><div class="k">Annual harvest (last 12 months)</div><div class="v">{% if res.annual_harvest_t is not None %}{{ res.annual_harvest_t|num:1 }}<span class="u">t/yr</span>{% else %}–{% endif %}</div>
+    <div class="n">{% if res.steady_state %}steady state{% else %}not yet at steady state — extend the horizon{% endif %}</div></div>
+  <div class="kpi"><div class="k">Harvest per batch</div><div class="v">{% if harvests %}{{ harvests.0.biomass_t|num:1 }}<span class="u">t</span>{% else %}–{% endif %}</div>
+    <div class="n">{% if harvests %}{{ harvests.0.count|num:0 }} fish × {{ harvests.0.weight_g|num:0 }} g{% endif %}</div></div>
+</div>
+
+<div class="card section">
+  <h2>Loads and requirements</h2>
+  <p class="sub" style="margin:0">Peak loads, required flows and biofilter sizing per RAS unit are on <a href="{% url 'requirements' scenario.pk %}">step 04 Requirements</a>.</p>
+</div>
+
+<div class="card section">
+  <h2>Batch schedule</h2>
+  <div class="legend">{% for s in res.stages %}<span><i class="bar" style="background:var(--s{{ forloop.counter }})"></i>{{ s.name }}</span>{% endfor %}</div>
+  <div class="gantt-box" style="height: {% widthratio res.batches|length 1 18 %}px; min-height: 200px"><canvas id="c-gantt"></canvas></div>
+  <p class="note">Each row is one batch; the bar ends on its harvest day. Batches not harvested within the plan run off the right edge.</p>
+</div>
+
+<div class="charts">
+  <div class="card chart"><h2>Required tank volume</h2><div class="unit">m³ per RAS unit</div>
+    <div class="legend">{% for s in res.stages %}<span><i style="background:var(--s{{ forloop.counter }})"></i>{{ s.name }}</span>{% endfor %}</div>
+    <div class="box"><canvas id="c-vol"></canvas></div></div>
+  <div class="card chart"><h2>Daily feed</h2><div class="unit">kg/day per RAS unit</div>
+    <div class="legend">{% for s in res.stages %}<span><i style="background:var(--s{{ forloop.counter }})"></i>{{ s.name }}</span>{% endfor %}</div>
+    <div class="box"><canvas id="c-feed"></canvas></div></div>
+  <div class="card chart"><h2>Batches held at once</h2><div class="unit">batches per RAS unit</div>
+    <div class="legend">{% for s in res.stages %}<span><i style="background:var(--s{{ forloop.counter }})"></i>{{ s.name }}</span>{% endfor %}</div>
+    <div class="box"><canvas id="c-bat"></canvas></div></div>
+</div>
+
+<div class="card section">
+  <h2>Harvest calendar</h2>
+  <div class="tablewrap harvests"><table class="data">
+    <thead><tr><th>Batch</th><th>Stocked</th><th>Harvested</th><th>Fish</th><th>Mean weight g</th><th>Biomass t</th></tr></thead>
+    <tbody>{% for h in harvests %}<tr><td>B{{ h.batch }}</td><td>{{ h.stock_date|date:"j M Y" }}</td><td>{{ h.date|date:"j M Y" }}</td><td>{{ h.count|num:0 }}</td><td>{{ h.weight_g|num:0 }}</td><td>{{ h.biomass_t|num:2 }}</td></tr>
+    {% empty %}<tr><td colspan="6" class="l">No harvest within the plan. Extend the planning horizon.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{{ chart|json_script:"plan-data" }}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script src="{% static 'vendor/chart.umd.min.js' %}"></script>
+<script>
+const P = JSON.parse(document.getElementById('plan-data').textContent);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const color = i => css(`--s${Math.min(i + 1, 8)}`);
+const fmt = (v, d = 1) => v == null ? '–' : v.toLocaleString('en-GB', { maximumFractionDigits: d });
+Chart.defaults.font.family = css('--mono');
+Chart.defaults.font.size = 11;
+const start = new Date(P.start + 'T00:00:00');
+const dayToDate = d => { const x = new Date(start); x.setDate(x.getDate() + Math.round(d)); return x; };
+const monthFmt = new Intl.DateTimeFormat('en-GB', { month: 'short', year: '2-digit' });
+const dayFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const step = P.horizon > 720 ? 91 : P.horizon > 240 ? 30 : 7;
+const timeAxis = {
+  type: 'linear', min: 0, max: P.horizon,
+  ticks: { color: css('--muted'), stepSize: step, autoSkip: true, maxRotation: 0, callback: v => monthFmt.format(dayToDate(v)) },
+  grid: { color: css('--grid') }, border: { color: css('--axis') }
+};
+const tooltip = { backgroundColor: css('--surface'), titleColor: css('--ink'), bodyColor: css('--ink-2'),
+  borderColor: css('--axis'), borderWidth: 1, padding: 10, boxWidth: 10, boxHeight: 10 };
+
+// Gantt: one dataset per RAS unit, one row per batch; bar = [entry day, exit day]
+new Chart(document.getElementById('c-gantt'), {
+  type: 'bar',
+  data: {
+    labels: P.gantt.map(b => b.label),
+    datasets: P.stages.map((name, k) => ({
+      label: name, backgroundColor: color(k), borderColor: css('--surface'), borderWidth: { left: 2 },
+      borderSkipped: false, borderRadius: 3, barPercentage: 0.9, categoryPercentage: 0.9,
+      data: P.gantt.map(b => { const s = b.segments.find(s => s.stage === k); return s ? [s.start, s.end] : null; }),
+      segInfo: P.gantt.map(b => b.segments.find(s => s.stage === k) || null),
+    }))
+  },
+  options: {
+    indexAxis: 'y', responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: { legend: { display: false }, tooltip: { ...tooltip, callbacks: {
+      title: i => `${i[0].label} · stocked ${dayFmt.format(dayToDate(P.gantt[i[0].dataIndex].segments[0].start))}`,
+      label: i => {
+        const s = i.dataset.segInfo[i.dataIndex];
+        return ` ${i.dataset.label}: ${dayFmt.format(dayToDate(s.start))} → ${dayFmt.format(dayToDate(s.end - 1))} · ${fmt(s.w_in, 1)} → ${fmt(s.w_out, 1)} g`;
+      },
+      afterBody: i => { const h = P.gantt[i[0].dataIndex].harvest; return h != null ? `Harvest: ${dayFmt.format(dayToDate(h))}` : 'Not harvested within the plan'; }
+    } } },
+    scales: { x: { ...timeAxis, position: 'top' },
+              y: { stacked: true, ticks: { color: css('--muted'), autoSkip: false, font: { size: 10 } }, grid: { display: false } } }
+  }
+});
+
+function lines(id, key, digits, stepped) {
+  const days = Array.from({ length: P.horizon }, (_, i) => i);
+  new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels: days, datasets: P.stages.map((name, k) => ({
+      label: name, data: P[key][k], borderColor: color(k), backgroundColor: color(k),
+      borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, stepped: stepped || false })) },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, parsing: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { ...tooltip, boxHeight: 3,
+        callbacks: { title: i => dayFmt.format(dayToDate(i[0].parsed.x)), label: i => ` ${i.dataset.label}: ${fmt(i.parsed.y, digits)}` } } },
+      scales: { x: timeAxis, y: { beginAtZero: true, ticks: { color: css('--muted'), maxTicksLimit: 5, precision: stepped ? 0 : undefined, callback: v => fmt(v, 1) },
+                                  grid: { color: css('--grid') }, border: { display: false } } } }
+  });
+}
+lines('c-vol', 'volume', 1);
+lines('c-feed', 'feed', 1);
+lines('c-bat', 'batches', 0, true);
+</script>
+{% endif %}
+{% endblock %}

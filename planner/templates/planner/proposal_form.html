@@ -1,0 +1,221 @@
+{% extends "planner/base.html" %}
+{% block title %}Proposal {{ p.number }}{% endblock %}
+{% block head %}
+<style>
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 16px; }
+.cols label, .full { display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: var(--ink-2); }
+textarea { font: 400 14px/1.45 var(--body); border: 1px solid var(--axis); border-radius: var(--radius); padding: 7px 10px;
+  background: var(--surface); color: var(--ink); width: 100%; resize: vertical; }
+textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+.side { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.side .btn { justify-content: center; }
+.secs label { display: flex; gap: 8px; align-items: center; padding: 4px 0; font-size: 14px; }
+table.data input, table.data textarea { font-size: 13px; padding: 4px 7px; }
+table.data td { vertical-align: top; white-space: normal; }
+table.data input.price { width: 120px; }
+.clause { border-top: 1px solid var(--grid); padding-top: 10px; margin-top: 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+.clause textarea { grid-column: 1 / -1; }
+.hint { color: var(--muted); font-size: 13px; }
+code { font: 400 12.5px var(--mono); background: var(--surface-2); padding: 1px 4px; border-radius: 3px; }
+.aibar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.aibar .ai-ins { flex: 1 1 260px; font-size: 13px; }
+.ai-go { border-color: var(--accent); color: var(--accent); }
+.ai-msg { font-size: 13px; color: var(--muted); }
+.btn[hidden] { display: none; }
+.ai-msg.err { color: var(--critical); }
+.ai-msg.busy::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border: 2px solid var(--accent);
+  border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.ai-off .aibar { display: none; }
+#review-out { white-space: pre-line; font-size: 13.5px; margin-top: 10px; max-height: 420px; overflow: auto; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 09 / 09 · Proposal {{ p.number }}</div><h1>{{ p.title }}</h1>
+  <div class="sub">Sizing, production plan, process drawings, CAPEX and OPEX are filled in from the scenario when the document is made. In the texts, <code>{company}</code>, <code>{customer}</code>, <code>{valid_until}</code> and <code>{currency}</code> are replaced automatically.</div></div></div>
+
+<form method="post" id="pform" class="{% if not ai_providers %}ai-off{% endif %}" data-ai-url="{% url 'proposal_ai' p.pk %}">{% csrf_token %}
+{{ form.non_field_errors }}
+<div class="layout">
+<div>
+  <section class="card section"><h2>Proposal</h2>
+    <div class="cols">
+      {% for f in form %}{% if f.name in "number title scenario date valid_until currency vat_pct" and f.name != "customer_name" %}
+      <label>{{ f.label }}{{ f }}{{ f.errors }}</label>{% endif %}{% endfor %}
+    </div>
+  </section>
+
+  <section class="card section"><h2>Customer</h2>
+    <div class="cols">
+      <label>{{ form.customer_name.label }}{{ form.customer_name }}</label>
+      <label>{{ form.customer_contact.label }}{{ form.customer_contact }}</label>
+      <label>{{ form.customer_email.label }}{{ form.customer_email }}</label>
+      <label>{{ form.customer_phone.label }}{{ form.customer_phone }}</label>
+      <label>{{ form.customer_reg.label }}{{ form.customer_reg }}</label>
+      <label>{{ form.customer_address.label }}{{ form.customer_address }}</label>
+    </div>
+  </section>
+
+  <section class="card section"><h2>Introduction</h2>
+    <label class="full">{{ form.intro }}<span class="hint">Leave empty: the introduction is written from the scenario (RAS units, stocking interval, harvest weight and yearly harvest).</span></label>
+    <div class="aibar" data-task="intro" data-target="id_intro"><input type="text" class="ai-ins" placeholder="Instructions for the AI (optional), e.g. mention the hatchery capacity" aria-label="Instructions for the AI"><button type="button" class="btn ai-go">✦ Write with AI</button><button type="button" class="btn ai-undo" hidden>Undo</button><span class="ai-msg" role="status"></span></div>
+  </section>
+
+  <section class="card section"><h2>Terms of the proposal</h2>{{ form.terms }}<div class="aibar" data-task="terms" data-target="id_terms"><input type="text" class="ai-ins" placeholder="Instructions for the AI (optional), e.g. mention the hatchery capacity" aria-label="Instructions for the AI"><button type="button" class="btn ai-go">✦ Write with AI</button><button type="button" class="btn ai-undo" hidden>Undo</button><span class="ai-msg" role="status"></span></div></section>
+
+  <section class="card section"><h2>Pricing — work packages</h2>
+    <p class="hint">The proposal is priced per project, not per piece of equipment. Give each package a price, or leave them empty and enter one total design fee.</p>
+    <div class="tablewrap"><table class="data" id="wp">
+      <thead><tr><th class="l">Work package</th><th class="l">Notes</th><th>Price {{ p.currency }}</th><th></th></tr></thead>
+      <tbody>
+      {% for w in p.work_packages %}
+        <tr><td class="l"><input type="text" name="wp_name" value="{{ w.name }}" aria-label="Work package"></td>
+          <td class="l"><textarea name="wp_notes" rows="2" aria-label="Notes">{{ w.notes }}</textarea></td>
+          <td><input class="price" type="number" step="any" min="0" name="wp_price" value="{{ w.price|default_if_none:'' }}" aria-label="Price"></td>
+          <td><button type="button" class="btn danger del" title="Remove package">✕</button></td></tr>
+      {% endfor %}
+        <tr class="blank"><td class="l"><input type="text" name="wp_name" placeholder="New work package" aria-label="Work package"></td>
+          <td class="l"><textarea name="wp_notes" rows="2" aria-label="Notes"></textarea></td>
+          <td><input class="price" type="number" step="any" min="0" name="wp_price" aria-label="Price"></td>
+          <td><button type="button" class="btn danger del" title="Remove package">✕</button></td></tr>
+      </tbody>
+    </table></div>
+    <button type="button" class="btn" id="add-wp" style="margin-top:8px">+ Add work package</button>
+    <div class="cols" style="margin-top:12px"><label>{{ form.lump_sum.label }} ({{ p.currency }}){{ form.lump_sum }}<span class="hint">Empty: the sum of the package prices.</span></label></div>
+  </section>
+
+  <section class="card section"><h2>System sizing — note</h2>
+    <label class="full">{{ form.sizing_note }}<span class="hint">Printed under the sizing table, e.g. design temperatures, salinity or hatchery egg capacity.</span></label>
+    <div class="aibar" data-task="sizing_note" data-target="id_sizing_note"><input type="text" class="ai-ins" placeholder="Instructions for the AI (optional), e.g. mention the hatchery capacity" aria-label="Instructions for the AI"><button type="button" class="btn ai-go">✦ Write with AI</button><button type="button" class="btn ai-undo" hidden>Undo</button><span class="ai-msg" role="status"></span></div>
+  </section>
+
+  <section class="card section"><h2>Payment terms</h2>{{ form.payment }}<div class="aibar" data-task="payment" data-target="id_payment"><input type="text" class="ai-ins" placeholder="Instructions for the AI (optional), e.g. mention the hatchery capacity" aria-label="Instructions for the AI"><button type="button" class="btn ai-go">✦ Write with AI</button><button type="button" class="btn ai-undo" hidden>Undo</button><span class="ai-msg" role="status"></span></div></section>
+
+  <section class="card section"><h2>General conditions</h2>
+    <div id="clauses">
+      {% for c in p.clauses %}
+      <div class="clause"><input type="text" name="cl_title" value="{{ c.title }}" aria-label="Title"><button type="button" class="btn danger del-cl" title="Remove">✕</button>
+        <textarea name="cl_text" rows="3" aria-label="Text">{{ c.text }}</textarea></div>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn" id="add-cl" style="margin-top:10px">+ Add condition</button>
+  </section>
+</div>
+
+<aside class="side">
+  <div class="card">
+    <h3>Document</h3>
+    <div style="display:flex; flex-direction:column; gap:8px">
+      <button class="btn primary" type="submit">Save</button>
+      <button class="btn" type="submit" name="then" value="pdf">Save and download PDF</button>
+      <a class="btn" href="{% url 'proposal_doc' p.pk %}" target="_blank" rel="noopener">Preview (saved version)</a>
+    </div>
+    <p class="hint" style="margin-bottom:0">Making the PDF takes a few seconds per process drawing.</p>
+    {% if scenario_changed %}<p class="warn" style="margin-bottom:0">The scenario changed after this PDF was generated — regenerate to refresh the figures.</p>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Before sending</h3>
+    <ul class="preflight">{% for label, ok, hint in preflight %}<li class="{% if ok %}ok{% else %}todo{% endif %}" title="{{ hint }}">
+      <i class="lamp {% if ok %}ok{% else %}warn{% endif %}"></i><span>{{ label }}</span>{% if not ok %}<span class="hint">{{ hint }}</span>{% endif %}</li>{% endfor %}</ul>
+  </div>
+  <div class="card" id="ai-card">
+    <h3>AI assistant</h3>
+    {% if ai_providers %}
+    <label style="display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(--ink-2)">Provider
+      <select id="ai-provider">{% for k, label in ai_providers %}<option value="{{ k }}" {% if k == ai_default %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button type="button" class="btn" id="ai-review" style="margin-top:8px; width:100%; justify-content:center">✦ Review the proposal</button>
+    <p class="hint" style="margin:6px 0 0">The AI reads the saved proposal and its scenario. Save first so it sees your latest changes. Check every text it writes.</p>
+    <div id="review-out" role="status"></div>
+    {% else %}
+    <p class="hint" style="margin:0">Add a Claude, OpenAI or Z.ai key on the <a href="{% url 'ai_settings' %}">AI settings</a> page to draft texts with AI.</p>
+    {% endif %}
+  </div>
+  <div class="card secs">
+    <h3>Sections</h3>
+    {% for key, label, on in sections %}<label><input type="checkbox" name="section" value="{{ key }}" {% if on %}checked{% endif %}> {{ label }}</label>{% endfor %}
+  </div>
+  {% if scenario %}<div class="card"><h3>From scenario</h3><p class="hint" style="margin:0">{{ scenario.name }}:
+    <a href="{% url 'production' scenario.pk %}">plan</a> · <a href="{% url 'process' scenario.pk %}">process</a> ·
+    <a href="{% url 'capex' scenario.pk %}">CAPEX</a> · <a href="{% url 'opex' scenario.pk %}">OPEX</a></p></div>{% endif %}
+</aside>
+</div>
+</form>
+<form method="post" action="{% url 'proposal_delete' p.pk %}" id="delform" style="margin-top:6px">{% csrf_token %}
+  <button class="btn danger" type="submit" id="del-btn">Delete proposal</button></form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const wp = document.querySelector('#wp tbody');
+  wp.addEventListener('click', e => {
+    const b = e.target.closest('.del'); if (!b) return;
+    const tr = b.closest('tr');
+    if (wp.rows.length > 1) tr.remove(); else tr.querySelectorAll('input, textarea').forEach(i => { i.value = ''; });
+  });
+  document.getElementById('add-wp').addEventListener('click', () => {
+    const tr = wp.querySelector('tr.blank').cloneNode(true);
+    tr.classList.remove('blank');
+    tr.querySelectorAll('input, textarea').forEach(i => { i.value = ''; });
+    wp.insertBefore(tr, wp.querySelector('tr.blank'));
+    tr.querySelector('input').focus();
+  });
+  const cl = document.getElementById('clauses');
+  cl.addEventListener('click', e => { const b = e.target.closest('.del-cl'); if (b) b.closest('.clause').remove(); });
+  document.getElementById('add-cl').addEventListener('click', () => {
+    const d = document.createElement('div');
+    d.className = 'clause';
+    d.innerHTML = '<input type="text" name="cl_title" placeholder="Title" aria-label="Title"><button type="button" class="btn danger del-cl" title="Remove">✕</button>'
+      + '<textarea name="cl_text" rows="3" aria-label="Text"></textarea>';
+    cl.appendChild(d); d.querySelector('input').focus();
+  });
+  // AI: draft a text into its field (Undo puts the old text back), or review the whole proposal
+  const pform = document.getElementById('pform');
+  const ask = async (task, current, instruction) => {
+    const fd = new FormData();
+    fd.append('csrfmiddlewaretoken', pform.querySelector('[name=csrfmiddlewaretoken]').value);
+    fd.append('task', task); fd.append('current', current || ''); fd.append('instruction', instruction || '');
+    const prov = document.getElementById('ai-provider');
+    if (prov) fd.append('provider', prov.value);
+    const r = await fetch(pform.dataset.aiUrl, { method: 'POST', body: fd });
+    return r.json();
+  };
+  document.querySelectorAll('.aibar').forEach(bar => {
+    const field = document.getElementById(bar.dataset.target);
+    const go = bar.querySelector('.ai-go'), undo = bar.querySelector('.ai-undo'), msg = bar.querySelector('.ai-msg');
+    let before = null;
+    go.addEventListener('click', async () => {
+      go.disabled = true; msg.className = 'ai-msg busy'; msg.textContent = 'Writing…';
+      try {
+        const res = await ask(bar.dataset.task, field.value, bar.querySelector('.ai-ins').value);
+        if (!res.ok) throw new Error(res.error);
+        before = field.value; field.value = res.text; undo.hidden = false;
+        msg.className = 'ai-msg'; msg.textContent = `Written by ${res.provider}. Check it, then save.`;
+      } catch (e) { msg.className = 'ai-msg err'; msg.textContent = e.message || 'The AI did not answer.'; }
+      go.disabled = false;
+    });
+    undo.addEventListener('click', () => { if (before !== null) field.value = before; undo.hidden = true; msg.textContent = 'Previous text restored.'; });
+  });
+  const rev = document.getElementById('ai-review');
+  if (rev) rev.addEventListener('click', async () => {
+    const out = document.getElementById('review-out');
+    rev.disabled = true; out.className = 'ai-msg busy'; out.textContent = 'Reading the proposal…';
+    try {
+      const res = await ask('review');
+      if (!res.ok) throw new Error(res.error);
+      out.className = ''; out.textContent = res.text;
+    } catch (e) { out.className = 'ai-msg err'; out.textContent = e.message || 'The AI did not answer.'; }
+    rev.disabled = false;
+  });
+  // deleting needs a second click (the viewer has no confirm dialogs)
+  const del = document.getElementById('del-btn');
+  del.addEventListener('click', e => {
+    if (del.dataset.armed) return;
+    e.preventDefault(); del.dataset.armed = '1'; del.textContent = 'Click again to delete';
+    setTimeout(() => { delete del.dataset.armed; del.textContent = 'Delete proposal'; }, 4000);
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}Feed table{% endblock %}
+{% block head %}
+<style>
+.layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.f { margin-bottom: 10px; } .f label { display: block; color: var(--ink-2); font-size: 13px; margin-bottom: 4px; }
+.inline { display: inline; }
+.layout .warn { margin: 12px 0 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Shared by all scenarios</div><h1>Feed table</h1>
+  <div class="sub">Each day the fish weight is checked, and the protein and FCR of the feed whose [min, max) range contains it are used.</div></div></div>
+<div class="layout">
+  <div class="card">
+    {% if feeds %}
+    <div class="tablewrap"><table class="data">
+      <tr><th>Feed</th><th>Weight range (g)</th><th>Protein %</th><th>FCR</th><th></th></tr>
+      {% for f in feeds %}
+      <tr><td>{{ f.name }}</td><td>{{ f.min_weight_g|num:1 }} – {{ f.max_weight_g|num:1 }}</td><td>{{ f.protein_pct|num:1 }}</td><td>{{ f.fcr|num:2 }}</td>
+        <td><a href="?edit={{ f.pk }}">Edit</a>
+          <form class="inline" method="post" onsubmit="return confirm('Delete this feed?')">{% csrf_token %}<button class="btn danger" name="delete" value="{{ f.pk }}" style="padding:2px 8px;margin-left:8px">Delete</button></form></td></tr>
+      {% endfor %}
+    </table></div>
+    {% for a, b in gaps %}<div class="warn">{% if b > a %}No feed covers {{ a|num:1 }}–{{ b|num:1 }} g, so default FCR and protein are used there.{% else %}Feeds overlap between {{ b|num:1 }} and {{ a|num:1 }} g; the one with the lower range is used.{% endif %}</div>{% endfor %}
+    {% else %}
+    <p class="sub">No feeds yet. Add one with the form, e.g. <em>BioMar Inicio, 0–5 g, 58% protein, FCR 0.8</em>.</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>{% if edit %}Edit feed{% else %}Add feed{% endif %}</h2>
+    <form method="post">{% csrf_token %}
+      {% if edit %}<input type="hidden" name="id" value="{{ edit.pk }}">{% endif %}
+      {{ form.non_field_errors }}
+      {% for f in form %}<div class="f"><label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{{ f.errors }}</div>{% endfor %}
+      <button class="btn primary" type="submit">Save feed</button>
+      {% if edit %}<a class="btn" href="{% url 'feeds' %}">Cancel</a>{% endif %}
+    </form>
+  </div>
+</div>
+{% endblock %}

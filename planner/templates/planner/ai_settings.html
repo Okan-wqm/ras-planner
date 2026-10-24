@@ -1,0 +1,40 @@
+{% extends "planner/base.html" %}
+{% block title %}AI settings{% endblock %}
+{% block head %}
+<style>
+.provs { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.prov h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.prov label { display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: var(--ink-2); margin-top: 10px; }
+.prov input[type=password] { font: 400 14px var(--mono); color: var(--ink); background: var(--surface); border: 1px solid var(--axis);
+  border-radius: var(--radius); padding: 6px 9px; width: 100%; }
+.state { font: 500 12px var(--mono); padding: 2px 8px; border-radius: 4px; }
+.state.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.state.off { color: var(--muted); background: var(--surface-2); }
+.clear { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 13px !important; }
+.hint { color: var(--muted); font-size: 13px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Proposals</div><h1>AI settings</h1>
+  <div class="sub">Your own API keys for drafting proposal texts. Keys are kept in this computer's local database and sent only to the provider you use. A saved key is never shown again; leave the field empty to keep it.</div></div></div>
+<form method="post">{% csrf_token %}
+  {{ form.non_field_errors }}
+  <div class="provs">
+    {% for p in providers %}
+    <section class="card prov">
+      <h2>{{ p.label }} {% if p.masked %}<span class="state on">key {{ p.masked }}</span>{% else %}<span class="state off">no key</span>{% endif %}</h2>
+      <label>API key{{ p.key_field }}</label>
+      {% if p.masked %}<label class="clear"><input type="checkbox" name="clear_{{ p.key }}"> Remove saved key</label>{% endif %}
+      <label>Model <input type="text" name="{{ p.model_field.html_name }}" value="{{ p.model_field.value|default_if_none:'' }}" placeholder="{{ p.default_model }}">
+        <span class="hint">Empty: {{ p.default_model }}</span></label>
+    </section>
+    {% endfor %}
+  </div>
+  <p class="hint">Tip: store production API keys in environment variables (RASPLAN_*_KEY) instead of the database before sharing this machine.</p>
+  <section class="card section" style="max-width:420px">
+    <label style="display:flex; flex-direction:column; gap:5px">Default provider {{ form.provider }}</label>
+    <p class="hint" style="margin-bottom:0">Used when you press an AI button in a proposal; you can pick another one there.</p>
+  </section>
+  <button class="btn primary" type="submit">Save AI settings</button>
+</form>
+{% endblock %}

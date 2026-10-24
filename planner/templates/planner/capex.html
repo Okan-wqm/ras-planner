@@ -1,0 +1,158 @@
+{% extends "planner/base.html" %}
+{% load fmt %}
+{% block title %}CAPEX · {{ scenario.name }}{% endblock %}
+{% block head %}
+<style>
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 12px; align-items: start; margin-bottom: 16px; }
+.grid2 > * { min-width: 0; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+table.data input, table.data select { font-size: 13px; padding: 4px 7px; }
+table.data input[type=number] { width: 130px; }
+table.data input.name { width: 100%; min-width: 180px; }
+td.nop { color: var(--warn); }
+input.off { opacity: 0.35; }
+.ov { color: var(--accent); }
+.bars { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; }
+.bars .lbl { color: var(--ink-2); font-size: 14px; }
+.bars .track { height: 12px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.bars .fill { height: 100%; background: var(--accent); border-radius: 0 3px 3px 0; }
+.bars .val { font: 500 13.5px var(--mono); text-align: right; }
+.savebar { position: sticky; bottom: 0; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  padding: 12px 16px; margin: 0 0 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.savebar label { display: flex; gap: 8px; align-items: center; color: var(--ink-2); }
+.savebar input { width: 90px; }
+.savebar .total { margin-left: auto; color: var(--ink-2); }
+.savebar .total b { font: 500 18px var(--mono); color: var(--ink); }
+tfoot td { font-weight: 600; border-top: 1px solid var(--axis); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 07 / 09 · Investment</div><h1>CAPEX</h1>
+  <div class="sub">Equipment comes from your <a href="{% url 'equipment' scenario.pk %}">Equipment</a> selections or the <a href="{% url 'process' scenario.pk %}">process diagram</a> (whichever is drawn), priced from <a href="{% url 'standards' %}">Standards</a>. Add everything else — building, piping, electrical, installation — as items below, either as an amount or as a share of the equipment cost.</div></div></div>
+
+{% if error %}
+<div class="card err">{{ error }} Fix the production plan first.</div>
+{% else %}
+
+<div class="kpis">
+  <div class="kpi"><div class="k">Total CAPEX</div><div class="v">{{ grand_total|num:0 }}<span class="u">{{ currency }}</span></div></div>
+  <div class="kpi"><div class="k">Equipment</div><div class="v">{{ equipment_total|num:0 }}<span class="u">{{ currency }}</span></div><div class="n">{{ lines|length }} line{{ lines|length|pluralize }}{% if missing %} · {{ missing }} without price{% endif %}</div></div>
+  <div class="kpi"><div class="k">Other items</div><div class="v">{{ extras_total|num:0 }}<span class="u">{{ currency }}</span></div><div class="n">{{ extras|length }} item{{ extras|length|pluralize }}: building, piping, installation…</div></div>
+  <div class="kpi"><div class="k">Per tonne of annual harvest</div><div class="v">{% if per_tonne is not None %}{{ per_tonne|num:0 }}<span class="u">{{ currency }}/t</span>{% else %}–{% endif %}</div><div class="n">{% if annual_harvest_t %}{{ annual_harvest_t|num:0 }} t/yr harvested{% else %}no full year of harvest in the plan{% endif %}</div></div>
+  <div class="kpi"><div class="k">Installed tank volume</div><div class="v">{{ tank_m3|num:0 }}<span class="u">m³</span></div><div class="n">from tank selections</div></div>
+</div>
+
+<form method="post">{% csrf_token %}
+  <input type="hidden" name="updated" value="{{ scenario.updated.isoformat }}">
+<section class="card section">
+  <h2>Equipment</h2>
+  {% if lines %}
+  <div class="tablewrap"><table class="data">
+    <thead><tr><th>RAS unit</th><th class="l">Category</th><th class="l">Item</th><th>Qty</th><th>Unit price {{ currency }}</th><th>Total {{ currency }}</th></tr></thead>
+    <tbody>{% for ln in lines %}
+      <tr><td><span class="swatch" style="background:var(--s{{ ln.stage_index|add:1 }})"></span>{{ ln.stage }} <span class="sub" title="Where this unit's equipment comes from">{% if ln.capex_source == 'diagram' %}from diagram{% else %}from equipment{% endif %}</span></td><td class="l">{{ ln.category }}</td><td class="l" title="{{ ln.names|join:', ' }}">{{ ln.item }}</td><td>{{ ln.qty }}</td>
+        <td><input type="hidden" name="line_key" value="{{ ln.key }}">
+          <input type="number" step="any" min="0" name="price-{{ ln.key }}" value="{% if ln.overridden %}{{ ln.price|stringformat:'g' }}{% endif %}"
+                 placeholder="{% if ln.unit_price is not None %}{{ ln.unit_price|stringformat:'g' }}{% else %}{{ currency }} / pc{% endif %}" aria-label="Unit price for {{ ln.item }}">
+          {% if ln.overridden %}<span class="ov" title="Overrides the standard's price">●</span>{% endif %}</td>
+        <td{% if ln.total is None %} class="nop"{% endif %}>{% if ln.total is not None %}{{ ln.total|num:0 }}{% else %}no price{% endif %}</td></tr>
+    {% endfor %}</tbody>
+    <tfoot><tr><td colspan="5" class="l">Equipment subtotal</td><td>{{ equipment_total|num:0 }}</td></tr></tfoot>
+  </table></div>
+  <p class="note">Leave a unit price empty to use the standard's price; type one to override it, or to price a custom item.</p>
+  {% else %}
+  <p class="sub">No equipment selected yet. Pick tanks, biomedia, pumps and filters for each RAS unit on the <a href="{% url 'equipment' scenario.pk %}">Equipment</a> page.</p>
+  {% endif %}
+</section>
+
+<section class="card section">
+  <h2>Other investment items</h2>
+  {% if percent_missing %}<p class="sub" style="color: var(--warn);">percent items are computed over priced lines only ({{ percent_missing }} without price)</p>{% endif %}
+  <div class="tablewrap"><table class="data" id="extras">
+    <thead><tr><th class="l">Item</th><th class="l">Group</th><th class="l">Priced as</th><th>Qty</th><th>Unit price {{ currency }}</th><th>% of equipment</th><th>Total {{ currency }}</th><th></th></tr></thead>
+    <tbody>
+    {% for x in extras %}
+      <tr>
+        <td class="l"><input class="name" type="text" name="x_name" value="{{ x.name }}" aria-label="Item"></td>
+        <td class="l"><select name="x_group" aria-label="Group">{% for g in groups %}<option {% if g == x.group %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></td>
+        <td class="l"><select name="x_mode" class="mode" aria-label="Priced as"><option value="amount" {% if x.mode != 'percent' %}selected{% endif %}>Qty × unit price</option><option value="percent" {% if x.mode == 'percent' %}selected{% endif %}>% of equipment</option></select></td>
+        <td><input type="number" step="any" min="0" name="x_qty" value="{{ x.qty|default_if_none:'' }}" aria-label="Quantity"></td>
+        <td><input type="number" step="any" min="0" name="x_price" value="{{ x.unit_price|default_if_none:'' }}" aria-label="Unit price"></td>
+        <td><input type="number" step="any" min="0" name="x_pct" value="{{ x.percent|default_if_none:'' }}" aria-label="Percent"></td>
+        <td>{{ x.total|num:0 }}</td>
+        <td><button type="button" class="btn danger del-row" title="Remove item">✕</button></td>
+      </tr>
+    {% endfor %}
+      <tr class="blank">
+        <td class="l"><input class="name" type="text" name="x_name" placeholder="e.g. Hall building, 1,200 m²" aria-label="Item"></td>
+        <td class="l"><select name="x_group" aria-label="Group">{% for g in groups %}<option>{{ g }}</option>{% endfor %}</select></td>
+        <td class="l"><select name="x_mode" class="mode" aria-label="Priced as"><option value="amount">Qty × unit price</option><option value="percent">% of equipment</option></select></td>
+        <td><input type="number" step="any" min="0" name="x_qty" value="1" aria-label="Quantity"></td>
+        <td><input type="number" step="any" min="0" name="x_price" aria-label="Unit price"></td>
+        <td><input type="number" step="any" min="0" name="x_pct" aria-label="Percent"></td>
+        <td>–</td>
+        <td><button type="button" class="btn danger del-row" title="Remove item">✕</button></td>
+      </tr>
+    </tbody>
+  </table></div>
+  <button type="button" class="btn" id="add-row" style="margin-top:10px">+ Add item</button>
+</section>
+
+<div class="grid2">
+  <section class="card">
+    <h2>CAPEX by group</h2>
+    <div class="bars">
+      {% for g, v, w in by_group %}<span class="lbl">{{ g }}</span><span class="track"><span class="fill" style="display:block; width: {{ w|floatformat:1 }}%"></span></span><span class="val">{{ v|num:0 }}</span>{% endfor %}
+    </div>
+  </section>
+  <section class="card">
+    <h2>Equipment by RAS unit</h2>
+    <table class="data">
+      <thead><tr><th>RAS unit</th><th>{{ currency }}</th></tr></thead>
+      <tbody>{% for name, v in by_stage %}<tr><td>{{ name }}</td><td>{{ v|num:0 }}</td></tr>{% empty %}<tr><td colspan="2" class="l sub">No equipment priced yet.</td></tr>{% endfor %}</tbody>
+    </table>
+  </section>
+</div>
+
+<div class="savebar">
+  <label>Currency <input type="text" name="currency" value="{{ currency }}" maxlength="8"></label>
+  <button class="btn primary" type="submit">Save CAPEX</button>
+  <span class="total">Total CAPEX <b>{{ grand_total|num:0 }} {{ currency }}</b></span>
+</div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const body = document.querySelector('#extras tbody');
+  if (!body) return;
+  // only the inputs that apply to the pricing mode are editable
+  // (readOnly, not disabled: disabled inputs are not submitted and would shift the row lists)
+  const sync = tr => {
+    const pct = tr.querySelector('.mode').value === 'percent';
+    for (const [name, off] of [['x_qty', pct], ['x_price', pct], ['x_pct', !pct]]) {
+      const el = tr.querySelector(`[name=${name}]`);
+      el.readOnly = off; el.classList.toggle('off', off);
+    }
+  };
+  body.querySelectorAll('tr').forEach(sync);
+  body.addEventListener('change', e => { if (e.target.classList.contains('mode')) sync(e.target.closest('tr')); });
+  body.addEventListener('click', e => {
+    const del = e.target.closest('.del-row');
+    if (!del) return;
+    const tr = del.closest('tr');
+    if (body.rows.length > 1) tr.remove(); else tr.querySelectorAll('input').forEach(i => { i.value = ''; });
+  });
+  document.getElementById('add-row').addEventListener('click', () => {
+    const tpl = body.querySelector('tr.blank') || body.rows[body.rows.length - 1];
+    const tr = tpl.cloneNode(true);
+    tr.querySelectorAll('input').forEach(i => { i.value = i.name === 'x_qty' ? '1' : ''; });
+    tr.cells[6].textContent = '–';
+    body.appendChild(tr); sync(tr);
+    tr.querySelector('input').focus();
+  });
+})();
+</script>
+{% endblock %}

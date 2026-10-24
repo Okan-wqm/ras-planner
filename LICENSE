@@ -1,0 +1,25 @@
+Suderra AS Proprietary License
+
+Copyright (c) 2026 Suderra AS, Norway. All rights reserved.
+
+This software, including its source code, formulas, data files, documentation and
+all related materials (the "Software"), is the exclusive property of Suderra AS.
+
+No license or right of any kind is granted to you, except the right to view the
+source code in this repository. In particular, without prior written permission
+from Suderra AS you may NOT:
+
+  1. use, run, or deploy the Software, in whole or in part, for any purpose,
+     whether commercial or non-commercial;
+  2. copy, reproduce, or redistribute the Software or any portion of it;
+  3. modify, adapt, translate, or create derivative works based on the Software;
+  4. sublicense, sell, rent, lease, or otherwise make the Software available to
+     any third party;
+  5. use the Software, its source code, or its data to train, fine-tune, or
+     evaluate machine-learning models.
+
+The Software is provided "as is", without warranty of any kind, express or
+implied. Suderra AS shall not be liable for any claim, damages, or other
+liability arising from or in connection with the Software.
+
+For licensing enquiries, contact Suderra AS.

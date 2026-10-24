@@ -1,0 +1,27 @@
+{% extends "planner/base.html" %}
+{% block title %}Company profile{% endblock %}
+{% block head %}
+<style>
+.form { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px 18px; max-width: 980px; }
+.form label { display: flex; flex-direction: column; gap: 5px; font-size: 14px; color: var(--ink-2); }
+.form textarea { font: 400 14px/1.4 var(--body); border: 1px solid var(--axis); border-radius: var(--radius); padding: 6px 9px; background: var(--surface); color: var(--ink); }
+.logo { max-height: 70px; max-width: 260px; display: block; margin: 6px 0; background: #fff; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Proposals</div><h1>Company profile</h1>
+  <div class="sub">The company that issues proposals. These details are printed on the cover and in the footer of every proposal.</div></div></div>
+<form method="post" enctype="multipart/form-data" class="card">{% csrf_token %}
+  {{ form.non_field_errors }}
+  <div class="form">
+    {% for f in form %}{% if f.name != "remove_logo" %}
+    <label>{{ f.label }}{{ f }}{{ f.errors }}</label>
+    {% endif %}{% endfor %}
+    <div>
+      {% if profile.logo %}<img class="logo" src="{{ profile.logo }}" alt="Current logo">
+      <label style="flex-direction:row; align-items:center">{{ form.remove_logo }} Remove logo</label>{% else %}<p class="note">No logo yet.</p>{% endif %}
+    </div>
+  </div>
+  <p style="margin-top:16px"><button class="btn primary" type="submit">Save profile</button> <a class="btn" href="{% url 'proposals' %}">Proposals</a></p>
+</form>
+{% endblock %}

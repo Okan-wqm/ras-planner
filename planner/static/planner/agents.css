@@ -1,0 +1,46 @@
+/* Agent org chart */
+.org-chart { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 24px 0; }
+.org-connector { width: 2px; height: 32px; background: var(--line); margin: 4px 0; }
+.org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px; width: 100%; max-width: 900px; padding-top: 12px;
+  border-top: 2px solid var(--line); position: relative; }
+.org-grid::before { content: ''; position: absolute; top: -2px; left: 50%; width: 2px; height: 12px;
+  background: var(--line); }
+
+.org-card { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 16px 12px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel, var(--bg)); cursor: pointer; transition: border-color .15s, transform .15s;
+  width: 100%; text-align: center; }
+.org-card:hover { border-color: var(--accent, var(--ink)); transform: translateY(-2px); }
+.org-icon { font-size: 28px; line-height: 1; }
+.org-label { font: 600 13px var(--body); color: var(--ink); }
+.org-name { font: 400 11px var(--mono); color: var(--muted); }
+.org-off { font: 600 10px var(--body); color: var(--alarm); text-transform: uppercase; }
+
+.org-root .org-card { border-width: 2px; border-color: var(--accent, var(--ink)); min-width: 200px; }
+
+/* editor dialog */
+#agent-editor[hidden] { display: none; }
+#agent-editor { position: fixed; inset: 0; z-index: 80; background: rgb(0 0 0 / .45);
+  display: flex; align-items: center; justify-content: center; }
+.editor-card { width: min(680px, calc(100vw - 48px)); max-height: 85vh;
+  display: flex; flex-direction: column; background: var(--panel, var(--bg));
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 12px 40px rgb(0 0 0 / .5); }
+.editor-card header { display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+  border-bottom: 1px solid var(--line); }
+.editor-card header strong { font: 600 15px var(--body); color: var(--ink); }
+.editor-card header code { font: 400 12px var(--mono); color: var(--muted); flex: 1; }
+.ed-toggle { display: flex; align-items: center; gap: 5px; font: 400 12px var(--body); color: var(--muted); }
+#ed-close { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 18px; }
+#ed-close:hover { color: var(--ink); }
+#ed-role { flex: 1; resize: vertical; min-height: 300px; max-height: 60vh;
+  font: 400 13px/1.6 var(--mono); padding: 14px 18px; border: none; outline: none;
+  background: var(--bg); color: var(--ink); }
+.editor-card footer { display: flex; gap: 10px; align-items: center;
+  padding: 12px 18px; border-top: 1px solid var(--line); }
+#ed-save { border: 1px solid var(--accent, var(--ink)); background: var(--accent-soft);
+  color: var(--ink); border-radius: 7px; padding: 8px 20px; font: 600 13px var(--body); cursor: pointer; }
+#ed-save:hover { border-color: var(--ink); }
+#ed-cancel { border: 1px solid var(--line); background: none; color: var(--muted);
+  border-radius: 7px; padding: 8px 16px; font: 400 13px var(--body); cursor: pointer; }

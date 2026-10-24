@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fast pre-push test subset (~30s). Git runs hooks from the repo root.
+# Install (or refresh after editing this template):
+#   cp tools/hooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+# Full suite before a release: .venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe -m pytest tests/test_excel_parity.py tests/test_process.py tests/test_web.py -q

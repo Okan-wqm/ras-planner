@@ -1,0 +1,208 @@
+{% extends "planner/base.html" %}
+{% load fmt %}{% load static %}
+{% block title %}Requirements · {{ scenario.name }}{% endblock %}
+{% block content %}
+<div class="titlebar"><div><div class="eyebrow">Step 04 / 09 · Requirements</div><h1>What the water treatment must do</h1>
+  <div class="sub">From the plan's busiest days: the loads each RAS unit produces and the flows and treatment needed to keep the tank water within its limits. These are the <strong>targets</strong> the process diagram (step 05) has to meet; equipment is chosen there.</div></div></div>
+
+{% if error %}<div class="card err">{{ error }} Fix the production plan first.</div>{% endif %}
+{% if flow_units %}
+<form method="post" class="flowform">{% csrf_token %}<input type="hidden" name="form" value="flows">
+{% for u in flow_units %}
+<section class="card section unit" style="--c: var(--s{{ u.index|add:1 }})" data-unit="{{ u.index }}">
+  <div class="unit-head"><span class="tag">RAS {{ u.index|add:1|stringformat:"02d" }}</span><h2>{{ u.d.stage.name }} · flow by parameter</h2>
+    <div class="facts"><span>busiest day <b>{{ u.d.peak.feed_kg|num:1 }} kg feed</b></span><span>{{ u.d.temperature|num:1 }} °C</span></div></div>
+  <p class="sub" style="margin:0 0 10px">Flow = load ÷ (limit in the tank − water entering the tank). Type the limit and what the treatment delivers; the largest flow is the design flow.</p>
+  <div class="tablewrap"><table class="data flowt">
+    <thead><tr><th class="l">Parameter</th><th>Load kg/day</th><th>Limit in tank mg/L</th><th>Water entering mg/L</th><th>Difference mg/L</th><th>Flow m³/h</th><th></th></tr></thead>
+    <tbody>
+    {% for r in u.rows %}
+      <tr data-key="{{ r.key }}" data-load="{{ r.load|plain }}"{% if r.key == 'o2' %} data-eta="{{ r.eta|plain }}"{% endif %}>
+        <td class="l"><b>{{ r.label }}</b><div class="hint">{{ r.load_note }}</div></td>
+        <td>{{ r.load|num:2 }}</td>
+        <td><input type="number" step="any" min="0" class="lim" name="u{{ u.index }}-{% if r.key == 'o2' %}o2_out{% else %}{{ r.key }}_max{% endif %}" value="{{ r.limit|plain }}" aria-label="{{ r.label }} limit in the tank">
+          <div class="hint">{{ r.limit_note }}</div></td>
+        <td><input type="number" step="any" min="0" class="inl" name="u{{ u.index }}-{{ r.key }}_in" value="{{ r.inlet|plain }}" aria-label="{{ r.label }} in the water entering the tank">
+          <div class="hint">{% if r.key == 'o2' %}<label class="o2src"><select name="u{{ u.index }}-pure" class="pure"><option value="no" {% if not r.pure %}selected{% endif %}>aerated water</option><option value="yes" {% if r.pure %}selected{% endif %}>pure oxygen (cone)</option></select></label> · saturation {{ r.csat|num:2 }}{% else %}{{ r.inlet_note }}{% endif %}</div></td>
+        <td class="dc">–</td>
+        <td class="qq">–</td>
+        <td class="mark"></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><td class="l" colspan="5">Design flow (largest) · loads follow the feed; set the feed through the FCR</td><td class="qd">–</td><td class="qe"></td></tr></tfoot>
+  </table></div>
+</section>
+{% endfor %}
+<div class="savebar"><button class="btn primary" type="submit">Save flow table and recalculate</button>
+  <span class="note" style="margin:0">Flows update as you type; saving recalculates the plan, tank sizes and the process targets.</span></div>
+</form>
+{% endif %}
+{% if not error %}
+<div class="card section">
+  <h2>Peak loads and requirements per RAS unit</h2>
+  <div class="tablewrap"><table class="data design">
+    <thead><tr><th></th>{% for d in designs %}<th><span class="swatch" style="background:var(--s{{ forloop.counter }})"></span>{{ d.stage.name }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="{{ designs|length|add:1 }}">Fish</td></tr>
+      <tr><td>Weight range</td>{% for d in designs %}<td>{% if not d.empty %}{{ d.weight_in|num:1 }} → {{ d.weight_out|num:1 }} g{% else %}–{% endif %}</td>{% endfor %}</tr>
+      <tr><td>Days in unit</td>{% for d in designs %}<td>{{ d.days_in_stage|default:"–" }} days</td>{% endfor %}</tr>
+      <tr><td>Max. batches at once</td>{% for d in designs %}<td>{{ d.peak.batches|default:"–" }}</td>{% endfor %}</tr>
+      <tr><td>Peak biomass</td>{% for d in designs %}<td>{{ d.peak.biomass_kg|num:0 }} kg</td>{% endfor %}</tr>
+      <tr class="group"><td colspan="{{ designs|length|add:1 }}">Tank</td></tr>
+      <tr><td><strong>Required tank volume (peak)</strong></td>{% for d in designs %}<td><strong>{{ d.peak.volume_m3|num:1 }} m³</strong></td>{% endfor %}</tr>
+      <tr><td>Tanks × volume per tank</td>{% for d in designs %}<td>{{ d.stage.n_tanks }} × {{ d.tank_volume_m3|num:2 }} m³</td>{% endfor %}</tr>
+      <tr class="group"><td colspan="{{ designs|length|add:1 }}">Feed and gas</td></tr>
+      <tr><td>Peak daily feed</td>{% for d in designs %}<td>{{ d.peak.feed_kg|num:1 }} kg/day</td>{% endfor %}</tr>
+      <tr><td>Oxygen source</td>{% for d in designs %}<td>{% if d.pure_oxygen %}Pure O₂ (cone){% else %}Aeration{% endif %}</td>{% endfor %}</tr>
+      <tr><td>Peak O₂ consumption (fish)</td>{% for d in designs %}<td>{{ d.peak.o2_kgd|num:1 }} kg/day</td>{% endfor %}</tr>
+      <tr><td>Peak O₂ use by nitrification</td>{% for d in designs %}<td>{{ d.peak.o2_bio_kgd|num:1 }} kg/day</td>{% endfor %}</tr>
+      <tr><td>Peak pure O₂ demand</td>{% for d in designs %}<td>{% if d.pure_oxygen %}{{ d.peak.pure_o2_kgd|num:1 }} kg/day{% else %}–{% endif %}</td>{% endfor %}</tr>
+      <tr class="hint"><td>Design O₂ (safety envelope)</td>{% for d in designs %}<td>{% if d.pure_oxygen %}{{ d.peak.design_pure_o2_kgd|num:1 }} kg/day{% else %}–{% endif %}</td>{% endfor %}</tr>
+      <tr class="hint"><td>Design CO₂ (safety envelope)</td>{% for d in designs %}<td>{{ d.peak.design_co2_kgd|num:1 }} kg/day</td>{% endfor %}</tr>
+      <tr><td>O₂ flow meter (peak)</td>{% for d in designs %}<td>{% if d.pure_oxygen %}{{ d.peak.o2_lpm_actual|num:1 }} Nl/min (0 °C){% else %}–{% endif %}</td>{% endfor %}</tr>
+      <tr><td>Ozone flow meter (peak)</td>{% for d in designs %}<td>{{ d.peak.ozone_lpm|num:2 }} Nl/min (0 °C, pure O₃)</td>{% endfor %}</tr>
+      <tr><td>Peak ozone</td>{% for d in designs %}<td>{{ d.peak.ozone_kgd|num:2 }} kg/day</td>{% endfor %}</tr>
+      <tr class="group"><td colspan="{{ designs|length|add:1 }}">Flows (peak)</td></tr>
+      <tr><td><strong>Design flow</strong></td>{% for d in designs %}<td><strong>{{ d.peak.q_design_m3h|num:0 }} m³/h</strong></td>{% endfor %}</tr>
+      <tr><td>Q O₂</td>{% for d in designs %}<td>{{ d.peak.q_o2_m3h|num:0 }} m³/h</td>{% endfor %}</tr>
+      <tr><td>Q TAN</td>{% for d in designs %}<td>{{ d.peak.q_tan_m3h|num:0 }} m³/h</td>{% endfor %}</tr>
+      <tr><td>Q CO₂</td>{% for d in designs %}<td>{{ d.peak.q_co2_m3h|num:0 }} m³/h</td>{% endfor %}</tr>
+      <tr><td>Q TSS</td>{% for d in designs %}<td>{{ d.peak.q_tss_m3h|num:0 }} m³/h</td>{% endfor %}</tr>
+      <tr><td>Water exchange for NO₃</td>{% for d in designs %}<td>{{ d.peak.q_no3_m3d|num:1 }} m³/day</td>{% endfor %}</tr>
+      <tr class="group"><td colspan="{{ designs|length|add:1 }}">Biofilter (peak feed × {{ designs.0.biofilter_params.feed_safety_factor|num:2 }})</td></tr>
+      <tr><td>Design feed / temperature / protein</td>{% for d in designs %}<td>{{ d.biofilter_params.daily_feed_kg|num:1 }} kg · {{ d.temperature|num:1 }} °C · {{ d.protein|pct:0 }}%</td>{% endfor %}</tr>
+      <tr><td>Tank retention / max.</td>{% for d in designs %}<td{% if not d.biofilter.feasible %} class="bad"{% endif %}>{{ d.retention_used_min|num:1 }}{% if d.retention_used_min < d.stage.retention_min %} <span class="sub" title="Shortened so the biofilter sees the peak design flow">(set {{ d.stage.retention_min|num:0 }})</span>{% endif %} / {{ d.max_retention_min|num:1 }} min</td>{% endfor %}</tr>
+      <tr><td>Recirculation flow</td>{% for d in designs %}<td>{{ d.biofilter.q_tank_m3h|num:0 }} m³/h</td>{% endfor %}</tr>
+      <tr><td>Biofilter outlet TAN</td>{% for d in designs %}<td{% if not d.biofilter.feasible %} class="bad"{% endif %}>{% if d.biofilter.feasible %}{{ d.biofilter.tan_out|num:3 }} mg/L{% else %}{{ d.biofilter.reason }}{% endif %}</td>{% endfor %}</tr>
+      <tr><td>Media volume (salt / fresh)</td>{% for d in designs %}<td>{% if d.biofilter.feasible %}{{ d.biofilter.media_salt_m3|num:1 }} / {{ d.biofilter.media_fresh_m3|num:1 }} m³{% else %}–{% endif %}</td>{% endfor %}</tr>
+      <tr><td><strong>Biofilter volume (salt / fresh)</strong></td>{% for d in designs %}<td>{% if d.biofilter.feasible %}<strong>{{ d.biofilter.volume_salt_m3|num:1 }} / {{ d.biofilter.volume_fresh_m3|num:1 }} m³</strong>{% else %}–{% endif %}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+  <p class="note">Peaks are the highest daily totals in each unit over the {{ res.horizon }}-day plan. Media area, fill ratio and safety factor are set below unless a unit overrides them on step 03. If a unit's retention exceeds its maximum, shorten it.</p>
+</div>
+
+{% if ft %}
+<div class="card section">
+  <h2>Flow-through (akarsu) comparison</h2>
+  <p class="mut">How much fresh water would the same farm need <strong>without recirculation</strong>?
+  Dilution-based: no biofilter, no degasser — water exchange controls everything.</p>
+  <table class="vals">
+    <tbody>
+      <tr class="group"><td colspan="2">Required make-up flow (single-pass, no treatment)</td></tr>
+      {% for name, q in ft.flows.items %}
+      <tr{% if name == ft.limiting_with_oxy %} class="bad"{% endif %}>
+        <td>{{ name|upper }}</td>
+        <td>{{ q|num:0 }} m³/h{% if name == ft.limiting_with_oxy %} ← limiting{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr class="group"><td colspan="2">Summary</td></tr>
+      <tr><td>Flow-through WITHOUT oxygenator</td><td><strong>{{ ft.total_no_oxy_m3h|num:0 }} m³/h</strong> ({{ ft.total_no_oxy_m3h|multiply:24|num:0 }} m³/day)</td></tr>
+      <tr><td>Flow-through WITH jet/cone O₂</td><td><strong>{{ ft.total_with_oxy_m3h|num:0 }} m³/h</strong> ({{ ft.total_with_oxy_m3h|multiply:24|num:0 }} m³/day)</td></tr>
+      <tr><td>Limiting parameter</td><td>{{ ft.limiting_with_oxy|upper }} (with O₂) · {{ ft.limiting_no_oxy|upper }} (without)</td></tr>
+      <tr><td>O₂ inlet (with/without oxy)</td><td>{{ ft.o2_inlet_with_oxy_mgl|num:1 }} / {{ ft.o2_inlet_no_oxy_mgl|num:1 }} mg/L</td></tr>
+      <tr><td>Water per feed</td><td>{{ ft.water_per_feed_l|num:0 }} L/kg feed</td></tr>
+      <tr class="group"><td colspan="2">vs current RAS design</td></tr>
+      <tr><td>RAS recirculation flow</td><td>{{ designs.0.peak.q_design_m3h|num:0 }} m³/h (treated, reused)</td></tr>
+      <tr><td>RAS make-up water</td><td>{{ designs.0.peak.q_no3_m3d|divide:24|num:1 }} m³/h (NO₃ control only)</td></tr>
+      <tr><td>Flow-through advantage</td>
+          <td>RAS saves {{ ft.total_with_oxy_m3h|subtract:designs.0.peak.q_no3_m3d|divide:24|num:0 }} m³/h of fresh water</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Flow-through sizing: Q = load ÷ (limit − inlet) for TAN, CO₂, TSS.
+  Without treatment, TSS and CO₂ typically dominate. An oxygenator (jet/cone) reduces the O₂-limited
+  flow but does not affect TAN/CO₂/TSS dilution.</p>
+</div>
+{% endif %}
+
+<section class="card section">
+  <h2>Required flows over the plan</h2>
+  <div class="legend"><span><i style="background:var(--s1)"></i>O₂</span><span><i style="background:var(--s2)"></i>TAN</span>
+    <span><i style="background:var(--s3)"></i>CO₂</span><span><i style="background:var(--s4)"></i>TSS</span><span class="note" style="margin:0">m³/h, sum of all batches in the unit; the design flow is the highest line on the busiest day</span></div>
+  <div class="charts" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr))">
+    {% for d in designs %}<div class="chart"><h2>{{ d.stage.name }}</h2><div class="unit">required flow, m³/h</div><div class="box"><canvas id="cf-{{ forloop.counter0 }}"></canvas></div></div>{% endfor %}
+  </div>
+</section>
+{{ flows|json_script:"flow-data" }}
+{% endif %}
+
+<form method="post">{% csrf_token %}
+<section class="card section">
+  <h2>Treatment assumptions</h2>
+  <p class="sub" style="margin-top:0">Loads per kg feed, removal efficiencies, water-quality limits and the peak factor. RAS units can override any of these on step 03.</p>
+  {{ params_form.non_field_errors }}
+  <div class="groups">
+    {% for group, items in params_form.grouped %}
+    <div class="card" style="background:var(--inset)"><h2>{{ group }}</h2>
+      {% for f in items %}<div class="row"><label for="{{ f.id_for_label }}">{{ f.label }}</label><div>{{ f }}{{ f.errors }}</div></div>{% endfor %}
+    </div>
+    {% endfor %}
+    <div class="card" style="background:var(--inset)"><h2>Biofilter</h2>
+      {% for f in bio_form %}<div class="row"><label for="{{ f.id_for_label }}">{{ f.label }}</label><div>{{ f }}{{ f.errors }}</div></div>{% endfor %}
+    </div>
+  </div>
+</section>
+<div class="savebar"><button class="btn primary" type="submit">Save assumptions and recalculate</button></div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script>
+// flow by parameter: Q = load / (limit − entering), live
+(function () {
+  const fmt = (v, d = 0) => (v == null || !isFinite(v)) ? '∞' : v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+  document.querySelectorAll('.flowform .unit').forEach(card => {
+    const calc = () => {
+      let best = null;
+      card.querySelectorAll('tbody tr').forEach(tr => {
+        const load = Number(tr.dataset.load), lim = Number(tr.querySelector('.lim').value), inl = Number(tr.querySelector('.inl').value);
+        const o2 = tr.dataset.key === 'o2';
+        const dc = o2 ? inl - lim : lim - inl;                      // O₂: what the water brings; others: room left in the tank
+        const q = dc > 0 ? load * 1000 / 24 / (dc * (o2 ? Number(tr.dataset.eta) || 1 : 1)) : Infinity;
+        tr.querySelector('.dc').textContent = fmt(dc, 2);
+        tr.querySelector('.qq').textContent = fmt(q, 0);
+        tr.classList.toggle('bad', !(dc > 0));
+        tr._q = q;
+        if (!best || q > best._q) best = tr;
+      });
+      card.querySelectorAll('tbody tr').forEach(tr => {
+        const on = tr === best;
+        tr.classList.toggle('sets', on);
+        tr.querySelector('.mark').innerHTML = on ? '<span class="status warn">sets the flow</span>' : '';
+      });
+      card.querySelector('.qd').textContent = best ? fmt(best._q, 0) : '–';
+      card.querySelector('.qe').textContent = '';
+    };
+    card.addEventListener('input', calc);
+    card.addEventListener('change', calc);
+    calc();
+  });
+})();
+</script>
+<script src="{% static 'vendor/chart.umd.min.js' %}"></script>
+<script>
+(function () {
+  const F = JSON.parse(document.getElementById('flow-data').textContent);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  Chart.defaults.font.family = css('--mono'); Chart.defaults.font.size = 11; Chart.defaults.color = css('--muted');
+  const start = new Date(F.start + 'T00:00:00');
+  const fmtDate = i => { const d = new Date(start); d.setDate(d.getDate() + i); return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }); };
+  const keys = [['q_o2_m3h', 'O₂', '--s1'], ['q_tan_m3h', 'TAN', '--s2'], ['q_co2_m3h', 'CO₂', '--s3'], ['q_tss_m3h', 'TSS', '--s4']];
+  F.series.forEach((s, k) => {
+    const el = document.getElementById(`cf-${k}`);
+    if (!el) return;
+    const n = s.q_o2_m3h.length;
+    new Chart(el, { type: 'line',
+      data: { labels: [...Array(n).keys()], datasets: keys.map(([key, label, c]) => ({ label, data: s[key], borderColor: css(c), backgroundColor: css(c),
+        borderWidth: 1.5, pointRadius: 0, tension: 0 })) },
+      options: { animation: false, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: { backgroundColor: css('--panel-2'), titleColor: css('--ink'), bodyColor: css('--ink-2'),
+          borderColor: css('--line-2'), borderWidth: 1, callbacks: { title: it => fmtDate(it[0].dataIndex) } } },
+        scales: { x: { ticks: { maxTicksLimit: 8, callback: (v, i) => fmtDate(i) }, grid: { display: false }, border: { color: css('--line-2') } },
+                  y: { beginAtZero: true, grid: { color: css('--line') }, border: { display: false } } } } });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
